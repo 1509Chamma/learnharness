@@ -562,8 +562,8 @@ export class SessionModel {
 	 * POST + consume. Ready-gated: one turn per client at a time (the
 	 * server's 409 + identity retry covers the wake-race window).
 	 */
-	async send(input: ChatInput): Promise<void> {
-		if (!this.readyRef) return;
+	async send(input: ChatInput): Promise<boolean> {
+		if (!this.readyRef) return false;
 		this.consumeAbort?.abort();
 		const controller = new AbortController();
 		this.consumeAbort = controller;
@@ -590,6 +590,7 @@ export class SessionModel {
 		if (optimistic.length > 0) this.mutate(() => {
 			this.tail = [...this.tail, ...optimistic];
 		});
+		let accepted = false;
 		try {
 			// SUBMITS ARE NOT ABORTABLE BY VIEW TEARDOWN (owner, 2026-10-10 —
 			// the dead-session-start postmortem): the POST must NOT ride
@@ -607,7 +608,7 @@ export class SessionModel {
 			if (res.status === 409) {
 				this.setError("A turn is already running — try again in a moment.");
 				this.setStatus("error");
-				return;
+				return false;
 			}
 			if (!res.ok) {
 				// Refusal envelopes (503 BYOK/key gates) and 400s: the RAW body
@@ -615,6 +616,7 @@ export class SessionModel {
 				// page's refusal flow JSON-parses the envelope out of it.
 				throw new Error((await res.text()) || `The send failed (${res.status}).`);
 			}
+			accepted = true;
 			// CONNECTION DIET B (owner, 2026-10-10 — parallel-session freeze
 			// postmortem): the POST acknowledges and closes; there is no stream
 			// on this response to consume. Attach through the SAME reattach wire
@@ -626,12 +628,17 @@ export class SessionModel {
 			// A stop() or a newer send/consume won while the ack was in
 			// flight: the turn is live server-side either way — do not attach
 			// a stream from a view that is gone or superseded.
-			if (this.consumeAbort !== controller) return;
+			if (this.consumeAbort !== controller) return true;
 			await this.resumeStream(true);
+			return true;
 		} catch (err) {
-			if ((err as Error).name === "AbortError") return; // stop() or a newer consume won
+			if ((err as Error).name === "AbortError") return accepted; // stop() or a newer consume won
 			this.setError((err as Error).message);
 			this.setStatus("error");
+			// true only once the POST ack landed. A throw before that (the
+			// fetch, or !res.ok) leaves the message unsent — the caller keeps
+			// its opening-text stash and a reload can retry.
+			return accepted;
 		}
 	}
 
@@ -681,7 +688,7 @@ export class SessionModel {
 	 *  result (fork 1), riding as its input event. */
 	submitAnswer(tool: string, toolCallId: string, output: QuestionAnswerData): Promise<void> {
 		void tool;
-		return this.send({ type: "answer", toolCallId, answer: output });
+		return this.send({ type: "answer", toolCallId, answer: output }).then(() => undefined);
 	}
 
 	/** The dismissal path (owner design 2026-10-03, "A2"): the skipped
