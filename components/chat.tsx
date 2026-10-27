@@ -66,9 +66,11 @@ import {
 	type CompactionDividerData,
 } from "@/components/compaction-divider";
 import { CoverageRing } from "@/components/extraction-coverage";
+import { Button } from "@/components/ui/button";
 import {
 	activeProblemOf,
 	dismissedAnswer,
+	endsInFailedTurn,
 	findPendingToolCall,
 	phaseAt3,
 	phaseTimeline,
@@ -158,6 +160,18 @@ export function parseProviderKeyRefusal(message: string | undefined): boolean {
 	} catch {
 		return false;
 	}
+}
+
+/** Retry sends no composer text. Its refusal must not resurrect the draft
+ * from an earlier, already-durable text send over today's unsent composer.
+ * Retire that fallback synchronously, never when the async Retry settles:
+ * a later ordinary send may own a new recovery draft by then. */
+export function retryFailedResponse(
+	send: (input: ChatInput) => void,
+	submittedDraft: { current: string | null },
+): void {
+	submittedDraft.current = null;
+	void send({ type: "retry" });
 }
 
 /** useLayoutEffect that is silent during SSR (client components still render on the server in Next). */
@@ -457,7 +471,6 @@ export function Chat({
 	const busy = localStream || turnInFlight;
 	const busyRef = useRef(busy);
 	busyRef.current = busy;
-
 	// The attach handoff (stream-reattach wave): the moment a resumed
 	// stream takes over the rendering — the SDK left "ready", so
 	// submitted/streaming means chunks are flowing — localStream covers
@@ -670,6 +683,12 @@ export function Chat({
 	// server's registry mutex is the structural gate; this is the
 	// affordance).
 	const [compacting, setCompacting] = useState(initiallyCompacting);
+	// A failed model response (issue #110): Retry keeps the saved input
+	// and completed work, without another learner message. Offered from
+	// "error" too: a dropped stream leaves the model there, and send()
+	// recovers from it. Later compaction requires new input instead.
+	const retryable = (status === "ready" || status === "error") && !busy && !compacting && endsInFailedTurn(nativeMessages);
+	const retryFailedTurn = () => retryFailedResponse(send, draftRef);
 	const canSend =
 		(text.trim().length > 0 || dictation.active) && !pending && !activeProblem && !compacting;
 
@@ -1574,8 +1593,13 @@ export function Chat({
 								</span>
 							)}
 							{error && (
-								<div className="rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm">
-									Something went wrong: {error.message}
+								<div className="flex items-center justify-between gap-3 rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm">
+									<span>Something went wrong: {error.message}</span>
+									{retryable && (
+										<Button variant="outline" size="xs" data-testid="retry-failed-turn" onClick={retryFailedTurn}>
+											Retry
+										</Button>
+									)}
 								</div>
 							)}
 						</div>
