@@ -26,6 +26,7 @@ import { Composer } from "@/components/composer";
 import { useEnterSubmits } from "@/components/enter-submits";
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { dockStateKey } from "@/components/dock-state-key";
+import { clearOpeningPrompt, readOpeningPromptEntry, stashOpeningPrompt, OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { forwardDockWheel, useDockHeight } from "@/components/dock-height";
 import { QueuedSteersBody, type QueuedSteerLine } from "@/components/queued-steers";
 import { DictationBar, finishDictation, joinDictation, useDictation } from "@/components/dictation";
@@ -251,7 +252,7 @@ export function Chat({
 	// (core/view.ts projectView); sends are ONE explicit input event each
 	// ({chatId, input} — the stash indirection died with the SDK), and the
 	// turn stream is the VERBATIM AgentEvent passthrough the server emits.
-	const { messages, nativeMessages, contextTokens, send, continueIfOwed, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, questionDraft, saveQuestionDraft, setMessages, adoptRecord, status, error, stop, clearError, resumeStream, setReattachSettled } =
+	const { messages, nativeMessages, hasConfirmedConversation, contextTokens, send, continueIfOwed, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, questionDraft, saveQuestionDraft, setMessages, adoptRecord, status, error, stop, clearError, resumeStream, setReattachSettled } =
 		useChatSession({ chatId, initialMessages, initialError, initiallyInFlight });
 
 	const sessionFindScopeRef = useRef<HTMLDivElement | null>(null);
@@ -260,16 +261,6 @@ export function Chat({
 
 	// The reattach settled terminal → the sync-and-continue seam (below).
 	setReattachSettled(() => reattachSettledRef.current());
-
-	// New chat with a topic: send the first message exactly once
-	// (initialPromptOwed — the pure gate, pinned in the test suite).
-	const sentInitial = useRef(false);
-	useEffect(() => {
-		if (!sentInitial.current && initialPromptOwed(initialMessages, initialPrompt)) {
-			sentInitial.current = true;
-			void send({ type: "text", text: initialPrompt! });
-		}
-	}, [initialPrompt, initialMessages, send]);
 
 	// A turn running server-side, attached to no live view of ours (navigate
 	// away mid-turn, or a wake turn discovered mid-session): the reattach
@@ -579,6 +570,66 @@ export function Chat({
 	 *  Auto-continuations (probe answers) never set it — their refusal
 	 *  opens recovery with no replay. */
 	const draftRef = useRef<string | null>(null);
+	const openingDraftRef = useRef<string | null>(null);
+	const [openingError, setOpeningError] = useState(false);
+	const openingMountedRef = useRef(false);
+	useEffect(() => {
+		openingMountedRef.current = true;
+		return () => { openingMountedRef.current = false; };
+	}, []);
+
+	const deliverOpeningPrompt = useCallback((prompt: string) => {
+		openingDraftRef.current = prompt;
+		// Persist uncertainty BEFORE the POST: another mount must restore,
+		// not race the still-arriving request. No storage means no auto-send.
+		if (!stashOpeningPrompt(chatId, prompt, true)) {
+			applyText(prompt);
+			setOpeningError(true);
+			return;
+		}
+		setOpeningError(false);
+		draftRef.current = prompt; // The existing 503 flow must restore it too.
+		applyText("");
+		void send({ type: "text", text: prompt }, () => {
+			clearOpeningPrompt(chatId);
+			openingDraftRef.current = null;
+			if (draftRef.current === prompt) draftRef.current = null;
+		}).then(accepted => {
+			if (!accepted && openingMountedRef.current && openingDraftRef.current === prompt && !textRef.current) {
+				applyText(prompt);
+			}
+		});
+	}, [chatId, send, applyText]);
+
+	const sentInitial = useRef(false);
+	useEffect(() => {
+		if (sentInitial.current) return;
+		sentInitial.current = true;
+		const entry = readOpeningPromptEntry(chatId);
+		const prompt = initialPrompt || entry?.text; // Legacy links still work.
+		if (!initialPromptOwed(initialMessages, prompt)) {
+			if (initialMessages.some(m => m.role === "user" || m.role === "assistant")) clearOpeningPrompt(chatId);
+			return;
+		}
+		openingDraftRef.current = prompt!;
+		if (entry?.attempted || initiallyInFlight) {
+			applyText(prompt!); // Interrupted start: the learner explicitly resends.
+			return;
+		}
+		deliverOpeningPrompt(prompt!);
+	}, [chatId, initialPrompt, initialMessages, initiallyInFlight, deliverOpeningPrompt, applyText]);
+
+	useEffect(() => {
+		if (!hasConfirmedConversation) return;
+		clearOpeningPrompt(chatId);
+		// A later canonical read may confirm a lost acknowledgment. Clear
+		// only the unchanged recovered draft, never the learner's newer work.
+		const opening = openingDraftRef.current;
+		if (opening !== null && textRef.current === opening) applyText("");
+		if (draftRef.current === opening) draftRef.current = null;
+		openingDraftRef.current = null;
+		setOpeningError(false);
+	}, [chatId, hasConfirmedConversation, applyText]);
 
 	// THE BYOK REFUSAL (owner, 2026-09-22): a send that lands the server's
 	// 503 models_not_configured envelope renders as the SETUP FLOW, never
@@ -1161,6 +1212,10 @@ export function Chat({
 			openModelPicker();
 			return; // No optimistic send and no change to the learner's draft.
 		}
+		if (openingDraftRef.current !== null) {
+			deliverOpeningPrompt(t);
+			return;
+		}
 		draftRef.current = t; // the refusal flow's preserve-and-replay seam
 		applyText("");
 		void send({ type: "text", text: t });
@@ -1592,6 +1647,7 @@ export function Chat({
 									</Shimmer>
 								</span>
 							)}
+							{openingError && <p role="alert" className="text-sm text-destructive">{OPENING_PROMPT_FAILURE}</p>}
 							{error && (
 								<div className="flex items-center justify-between gap-3 rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm">
 									<span>Something went wrong: {error.message}</span>
@@ -1779,7 +1835,8 @@ export function Chat({
  *  2026-10-02 abort chain proper (question before turn). */
 export type EscAbortTarget = "mermaid" | "plan" | "setup" | "question" | "problem" | "turn" | null;
 	/**
- * Does the ?prompt topic still owe its first send? The gate is "no real
+ * Does the opening topic still owe its first send? The topic is the
+ * server's ?prompt= or the sessionStorage stash. The gate is "no real
  * conversation yet" (no user/assistant message) — NOT emptiness: a
  * session started with map picks carries a graph-context MARKER as
  * message[0], and that scaffolding must never swallow the first send
