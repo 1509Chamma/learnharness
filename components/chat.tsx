@@ -5,7 +5,7 @@ import { useChatSession } from "@/components/session";
 import { visibleQueuedSteers } from "@/components/session-core";
 import { SetupDialog } from "@/components/setup-dialog";
 import { Hint } from "@/components/ui/hint";
-import { useZeroKeys, ZeroKeysPill } from "@/components/setup-cta";
+import { useModelSetup, selectedModelUnavailable, openModelPicker, ZeroKeysPill } from "@/components/setup-cta";
 import { useStickToBottomContext, type StickToBottomContext } from "use-stick-to-bottom";
 import {
 	Conversation,
@@ -26,6 +26,7 @@ import { Composer } from "@/components/composer";
 import { useEnterSubmits } from "@/components/enter-submits";
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { dockStateKey } from "@/components/dock-state-key";
+import { forwardDockWheel, useDockHeight } from "@/components/dock-height";
 import { QueuedSteersBody, type QueuedSteerLine } from "@/components/queued-steers";
 import { DictationBar, finishDictation, joinDictation, useDictation } from "@/components/dictation";
 import { useFieldCycle } from "@/components/field-cycle";
@@ -79,8 +80,6 @@ import {
 } from "@/src/core";
 import { ReadingThinkingField } from "@/components/reading-thinking";
 import { currentUserThinkingOpen, setAllUserThinkingOpen } from "@/components/thinking-block";
-import { slotsConfigured, type ModelsSettings } from "@/src/core";
-import { useSettingsSaved } from "@/components/settings-signal";
 
 /** One width for everything: transcript, cards, and the bottom blob share this column. */
 /**
@@ -555,30 +554,18 @@ export function Chat({
 		textRef.current = v;
 		setText(v);
 	}, []);
-	// The BYOK setup flow (owner, 2026-09-22): the persistent CTA and the
-	// refusal interception share one SetupDialog mount. `configured` is
-	// seeded server-side (slotsConfigured on the record) and flips on Save.
-	const [configured, setConfigured] = useState(initialConfigured);
-	// The zero-keys truth (zero-keys wave): no provider key = the pill
-	// takes precedence over the models CTA (keys come first in the chain).
-	// Reads once on mount, re-reads on the "keys" signal.
-	const zeroKeys = useZeroKeys();
-	// Cross-surface freshness (fix wave): another surface's models write —
-	// setup save, composer pick, a settings write — re-reads the record so
-	// the setup CTA appears/disappears live (it used to lag until reload).
-	useSettingsSaved((section) => {
-		if (section !== "models") return;
-		fetch("/api/settings")
-			.then((r) => r.json() as Promise<{ settings?: { models?: ModelsSettings } | null } | null>)
-			.then((body) => setConfigured(slotsConfigured(body?.settings?.models)))
-			.catch(() => {});
-	});
+	// Saved slot completeness is live, but the session's selected route
+	// comes from its own ordinary model control, never today's Strong pin.
+	const { catalog, configured, zeroKeys } = useModelSetup(initialConfigured);
+	const catalogRef = useRef(catalog);
+	catalogRef.current = catalog;
+	const [selectedModel, setSelectedModel] = useState<string | undefined>();
 	const [setupOpen, setSetupOpen] = useState(false);
 	/** The last explicitly-sent draft (composer send): the
 	 *  refusal flow restores it into the composer, where it waits for the
 	 *  learner to re-send (Save never auto-sends, owner 2026-10-09).
 	 *  Auto-continuations (probe answers) never set it — their refusal
-	 *  opens the dialog with no replay. */
+	 *  opens recovery with no replay. */
 	const draftRef = useRef<string | null>(null);
 
 	// THE BYOK REFUSAL (owner, 2026-09-22): a send that lands the server's
@@ -594,8 +581,9 @@ export function Chat({
 		if (!error) return;
 		const missing = parseModelsRefusal(error.message);
 		// The key-refusal twin (zero-keys wave): a pinned model whose
-		// provider key is gone gets the SAME treatment — revert-draft and
-		// open setup (the dialog derives to its first-key stage on its own).
+		// provider key is gone also restores the draft. With another provider
+		// connected, repair belongs to the ordinary current-session picker;
+		// otherwise setup derives its exclusive provider/loading stage.
 		const keyRefused = parseProviderKeyRefusal(error.message);
 		if (!missing && !keyRefused) return; // a real error keeps the honest banner
 		// ORDER MATTERS: clearError() flips this effect's own dep (`error`)
@@ -615,7 +603,8 @@ export function Chat({
 				draftRef.current = null;
 			}
 			clearError();
-			setSetupOpen(true);
+			if (keyRefused && catalogRef.current?.providers.some((p) => p.keyPresent)) openModelPicker();
+			else setSetupOpen(true);
 		})();
 		return () => {
 			cancelled = true;
@@ -1152,6 +1141,14 @@ export function Chat({
 		if (busy || pending || compacting) return;
 		const t = textRef.current.trim();
 		if (!t) return;
+		if (zeroKeys) {
+			setSetupOpen(true);
+			return;
+		}
+		if (selectedModelUnavailable(catalog, selectedModel)) {
+			openModelPicker();
+			return; // No optimistic send and no change to the learner's draft.
+		}
 		draftRef.current = t; // the refusal flow's preserve-and-replay seam
 		applyText("");
 		void send({ type: "text", text: t });
@@ -1616,6 +1613,7 @@ export function Chat({
 					compactionRunning={compacting}
 					onSubmitThinking={submitThinking}
 					chatId={chatId}
+					onModelChange={setSelectedModel}
 					plan={hasPlan ? <PlanMarginalia messages={messages} /> : undefined}
 					onOpenPlan={() => setPlanOpen(true)}
 					requiresReveal={requiresReveal}
@@ -1719,7 +1717,6 @@ export function Chat({
 			onClose={() => setSetupOpen(false)}
 			onDone={() => {
 				setSetupOpen(false);
-				setConfigured(true);
 				// Save only saves (owner ruling 2026-10-09): the draft went
 				// home into the composer at refusal time and STAYS there —
 				// the learner sends it themselves.
@@ -1854,6 +1851,7 @@ function DockOverlay({
 	composer,
 	onSubmitAnswer,
 	chatId,
+	onModelChange,
 	onReserve,
 	plan,
 	onOpenPlan,
@@ -1890,6 +1888,7 @@ function DockOverlay({
 	onSubmitAnswer: (output: QuestionAnswerData) => void;
 	/** The model control's pass-through (the stats bar hosts it). */
 	chatId: string;
+	onModelChange: (model: string | undefined) => void;
 	/** Reports the dock's settled height (block + gradient) — ChatView's
 	 *  dockReserve state feeds the transcript's spacer from it. */
 	onReserve: (h: number) => void;
@@ -1984,6 +1983,17 @@ function DockOverlay({
 	const revealedRef = useRef(revealed);
 	revealedRef.current = revealed;
 
+	const blockRef = useRef<HTMLDivElement>(null);
+	const viewportRef = useRef<HTMLDivElement>(null);
+	const bodyRef = useRef<HTMLDivElement>(null);
+	const shellRef = useRef<HTMLDivElement>(null);
+	const contentRef = useRef<HTMLDivElement>(null);
+	const mode = pending
+		? `question:${pending.toolCallId}`
+		: practice
+			? `practice:${practice.toolCallId}`
+			: "chat";
+
 	// The plan marginalia's flank width (owner, plan-placement round): from
 	// the DOCK container's right edge to the block's right edge — the bare
 	// diagram's canvas. Tracked LIVE by a ResizeObserver on the block
@@ -2022,28 +2032,33 @@ function DockOverlay({
 		return () => ro.disconnect();
 	}, []);
 
+	// The reserve grows immediately, but never shrinks while a question or
+	// practice problem owns the dock: shrinking flow space could pin a nearby
+	// learner back to the bottom. Composer mode may give space back.
+	const reserveRef = useRef(0);
+	const offer = useCallback((blockH: number) => {
+		const next = blockH + GRADIENT_H;
+		if (next <= reserveRef.current + 0.5 && pendingRef.current) return;
+		// Stamp growth at the source, including child-only field resizes, so
+		// stick-to-bottom's catch-up is not mistaken for the learner leaving.
+		if (shouldStampGeometryMute(next, reserveRef.current, pendingRef.current)) geometryAtRef.current = Date.now();
+		reserveRef.current = next;
+		onReserve(next);
+	}, [onReserve]);
+
 	// The overlay must not paint over the scroller's scrollbar (owner, scroll
 	// round 2): the scroller reserves symmetric gutters (scrollbar-gutter:
 	// stable both-edges), so inset the overlay's right edge by the gutter —
 	// zero on macOS overlay scrollbars, the real width on classic platforms.
-	// The same measure owns the QUESTION/PROBLEM HEIGHT CAP (owner round,
-	// 2026-10-05): the old fixed fractions (55dvh / 40vh) cut long problems
-	// off absurdly short — the cap is now the AVAILABLE COLUMN (the
-	// scroller already starts below the top bar) minus a 2rem breathing
-	// gap, carried as --dock-max-h for the docks' scroll areas.
+	// Budget the whole solid dock, leaving only its question area flexible.
+	// The hook measures natural, visible content before the morph/reserve
+	// effect below. Short windows scroll the reading/question/answer body;
+	// the stats/model toolbar remains outside that overflow viewport.
 	const [sbInset, setSbInset] = useState(0);
-	const [dockMaxH, setDockMaxH] = useState<number | null>(null);
-	useEffect(() => {
-		const el = scrollRef.current;
-		if (!el) return;
-		const measure = () => {
-			setSbInset(Math.round((el.offsetWidth - el.clientWidth) / 2));
-			setDockMaxH(Math.max(el.clientHeight - 32, 160));
-		};
-		measure();
-		window.addEventListener("resize", measure);
-		return () => window.removeEventListener("resize", measure);
-	}, [scrollRef]);
+	useDockHeight({
+		scrollRef, blockRef, viewportRef, bodyRef, shellRef, contentRef,
+		expanded, enabled: !!pending || !!practice, mode, onScrollbarInset: setSbInset, onHeight: offer,
+	});
 
 	// GROWTH MUTE (owner round, 2026-10-05 — the generation churn): during a
 	// live turn the transcript content grows and stick-to-bottom chases it;
@@ -2079,47 +2094,10 @@ function DockOverlay({
 		const root = blockRef.current;
 		const el = scrollRef.current;
 		if (!root || !el) return;
-		const canScroll = (n: HTMLElement, dir: number) => {
-			if (n.scrollHeight - n.clientHeight < 2) return false; // not scrollable
-			return dir < 0 ? n.scrollTop > 0 : n.scrollTop < n.scrollHeight - n.clientHeight - 0.5;
-		};
-		const onWheel = (e: WheelEvent) => {
-			if (e.deltaY === 0) return;
-			for (let n = e.target as HTMLElement | null; n && n !== root; n = n.parentElement) {
-				if (n instanceof HTMLElement && canScroll(n, e.deltaY)) return; // native
-			}
-			e.preventDefault();
-			el.scrollTop += e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientHeight : 1);
-		};
+		const onWheel = (e: WheelEvent) => forwardDockWheel(e, root, el);
 		root.addEventListener("wheel", onWheel, { passive: false });
 		return () => root.removeEventListener("wheel", onWheel);
 	}, [scrollRef]);
-
-	// ── The reserve: the spacer's height, reported upward ──
-	// Grows immediately (typing, new variants). NEVER drops while a question
-	// is open — a shrinking reserved tail is scroll geometry and the browser
-	// clamp would pin a nearby learner to the bottom (the old oscillation).
-	// In chat mode drops apply (the composer's typing shrink is today's
-	// harmless in-flow behavior; nothing auto-expands there).
-	const reserveRef = useRef(0);
-	const blockRef = useRef<HTMLDivElement>(null);
-	const offer = (blockH: number) => {
-		const next = blockH + GRADIENT_H;
-		if (next <= reserveRef.current + 0.5 && pendingRef.current) return; // fold immunity
-		// Reserve GROWTH is the phantom-scroll SOURCE (flicker round,
-		// 2026-09-26): the spacer's height lands in this commit, the smooth
-		// catch-up lags it by the growth amount, and the position machine
-		// used to read that lag as the learner leaving — form → bar → form
-		// (the dictation flush, reproduced d≈152 > COLLAPSE_DIST). Stamp the
-		// mute right where the spacer grows: it covers the scroll events of
-		// THIS growth no matter how long after the field stretched (the
-		// field grows on its own render; the offer lands on the NEXT
-		// DockOverlay render — ~1s apart live). Shrinks never stamp (the
-		// fold's own give-back must not self-mute the re-expand).
-		if (shouldStampGeometryMute(next, reserveRef.current, pendingRef.current)) geometryAtRef.current = Date.now();
-		reserveRef.current = next;
-		onReserve(next);
-	};
 
 	// Explicit expand (bar click): the smooth scroll to the bottom takes
 	// hundreds of ms, during which the position is still legitimately inside
@@ -2222,11 +2200,6 @@ function DockOverlay({
 		if (b) offer(b.getBoundingClientRect().height);
 	};
 
-	const mode = pending
-		? `question:${pending.toolCallId}`
-		: practice
-			? `practice:${practice.toolCallId}`
-			: "chat";
 	// The opening variant of a session appears instantly — the fade/rise is
 	// reserved for mid-session transitions.
 	const initialModeRef = useRef(mode);
@@ -2234,11 +2207,9 @@ function DockOverlay({
 	// Height morph: animate the shell from its previous height to its new one
 	// whenever the variant (chat ↔ question ↔ collapsed bar) changes. Typing
 	// growth keeps the same stateKey and is NOT animated.
-	const shellRef = useRef<HTMLDivElement>(null);
 	// The fold's CONTENT fade (owner round, 2026-10-05): the shell height
 	// morphs, but the bar↔form content used to hard-swap. A WAAPI fade/rise
 	// on the toggle — no remount, so the question form's state survives.
-	const contentRef = useRef<HTMLDivElement>(null);
 	const prevExpandedForFadeRef = useRef(expanded);
 	useIsoLayoutEffect(() => {
 		if (prevExpandedForFadeRef.current === expanded) return;
@@ -2286,8 +2257,10 @@ function DockOverlay({
 	return (
 		<div className="pointer-events-none absolute inset-x-0 bottom-0" style={{ right: sbInset }}>
 			<div className="h-24 bg-gradient-to-t from-background via-background/85 to-transparent" />
-			<div ref={blockRef} className="relative bg-background pb-5" style={{ "--dock-max-h": dockMaxH ? `${dockMaxH}px` : undefined } as React.CSSProperties}>
+			<div ref={blockRef} className="relative bg-background pb-5">
 				<div className={DOCK}>
+					<div ref={viewportRef} data-dock-viewport="" className="pointer-events-auto">
+					<div ref={bodyRef}>
 					{setupCta}
 					{/* The queued-steer indicator (owner spec 2026-10-03): quiet
 					    one-liners above the shell - right-aligned to where its corner
@@ -2316,11 +2289,13 @@ function DockOverlay({
 						/>
 					)}
 					<div ref={shellRef} className="pointer-events-auto overflow-hidden rounded-2xl border bg-card shadow-lg">
+						{/* Include descendant margins (notably practice thinking's
+						    bottom margin) in the natural content measurement. */}
 						<div
-						ref={contentRef}
-						key={mode}
-						className={mode === initialModeRef.current ? undefined : "dock-variant"}
-					>
+							ref={contentRef}
+							key={mode}
+							className={mode === initialModeRef.current ? "flow-root" : "flow-root dock-variant"}
+						>
 							{pending ? (
 								<QuestionDock
 									toolName={pending.tool as "quiz" | "probe" | "ask_user_question" | "explain" | "recall"}
@@ -2355,6 +2330,8 @@ function DockOverlay({
 							)}
 						</div>
 					</div>
+					</div>
+					</div>
 					{/* The stats row: beneath the composer/question shell, not
 					    flush to the screen bottom — static height, outside the
 					    morphing shell so it never joins a height animation. */}
@@ -2364,6 +2341,7 @@ function DockOverlay({
 						pricing={pricing}
 						dictationSlot={dictationSlot}
 						chatId={chatId}
+						onModelChange={onModelChange}
 					/>
 					{/* The scroll-down disc (moved here from the Conversation,
 					    owner refinement round 2026-09-24): anchored to the BLOCK's
