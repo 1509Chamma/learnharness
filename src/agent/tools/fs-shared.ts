@@ -37,9 +37,13 @@ const EXCLUDED_DIR_NAMES = new Set(["node_modules", ".git", "Library", ".Trash"]
 
 /** Resolve a tool path argument: absolute stays, relative/absent → home.
  *  (pi resolves against the project cwd; the harness's "project" is the
- *  learner's life, so the home directory is the anchor.) */
+ *  learner's life, so the home directory is the anchor.) A leading `~`
+ *  (`~`, `~/x`, `~\x`) is the home directory too — prompts and learners
+ *  write paths that way, and without expansion it resolved to `<home>/~/x`. */
 export function resolveSourcePath(p?: string): string {
 	if (!p) return os.homedir();
+	if (p === "~") return os.homedir();
+	if (p.startsWith("~/") || p.startsWith("~\\")) return path.join(os.homedir(), p.slice(2));
 	return path.isAbsolute(p) ? p : path.join(os.homedir(), p);
 }
 
