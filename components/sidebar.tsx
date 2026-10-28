@@ -21,6 +21,10 @@ import { fuzzyScore } from "@/src/core";
 import { useServerEvent, useServerResync } from "@/components/server-events";
 import type { ChatListItem, ModuleSummary } from "@/src/core";
 import { ModuleRow, ModulesHeader, MoveToModuleItems, NewModuleInput, sidebarRows, useExpandedModules } from "@/components/sidebar-modules";
+import { ResizeHandle, useResizableWidth } from "@/components/resizable";
+
+/** The session sidebar's width range (resizable, fork feature). */
+const SIDEBAR_WIDTH = { key: "sidebar", initial: 288, min: 220, max: 520 };
 import { kbdEventForAction } from "@/src/core";
 import { notifySettingsSaved } from "@/components/settings-signal";
 
@@ -390,6 +394,7 @@ const KIND_FILTER_KEY = "lh:session-kind-filter";
 function SessionsSidebar() {
 	const { open, toggle } = useSidebar();
 	const [chats, setChats] = useState<ChatListItem[] | null>(null);
+	const resize = useResizableWidth(SIDEBAR_WIDTH);
 	const [modules, setModules] = useState<ModuleSummary[]>([]);
 	const [addingModule, setAddingModule] = useState(false);
 	const [query, setQuery] = useState("");
@@ -724,10 +729,14 @@ function SessionsSidebar() {
 
 	return (
 		<aside
-			className={cn("sidebar-motion shrink-0 overflow-hidden duration-200", open ? "w-72" : "w-0")}
+			className="sidebar-motion relative shrink-0 overflow-hidden duration-200"
+			// The width is the learner's (drag the right edge); the open/close
+			// animation is switched off mid-drag so the edge tracks the pointer.
+			style={{ width: open ? resize.width : 0, ...(resize.dragging ? { transition: "none" } : {}) }}
 			aria-hidden={!open}
 		>
-			<div className="flex h-full w-72 flex-col border-r bg-background">
+			{open && <ResizeHandle side="right" label="Resize sidebar" state={resize} />}
+			<div className="flex h-full flex-col border-r bg-background" style={{ width: resize.width }}>
 				{/* LH wordmark — the owner's header; close toggle sits at the edge.
 				    Merged chrome (2026-09-17): in Electron this band is the
 				    window's drag surface and starts after the traffic lights

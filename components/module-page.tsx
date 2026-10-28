@@ -17,6 +17,10 @@ import { Chat } from "@/components/chat";
 import { useServerEvent } from "@/components/server-events";
 import { timeAgo } from "@/components/sidebar";
 import { Button } from "@/components/ui/button";
+import { ResizeHandle, useResizableWidth } from "@/components/resizable";
+
+/** The module panel's width range (resizable, fork feature). */
+const MODULE_PANEL_WIDTH = { key: "module-panel", initial: 416, min: 300, max: 760 };
 
 const PLAN_PLACEHOLDER = [
 	"Resources, lecture checklist, progress — markdown.",
@@ -69,6 +73,7 @@ export function ModulePanel({
 	const [plan, setPlan] = useState(initialModule.plan);
 	const [editingPlan, setEditingPlan] = useState(false);
 	const [confirmDelete, setConfirmDelete] = useState(false);
+	const resize = useResizableWidth(MODULE_PANEL_WIDTH);
 
 	const refetch = useCallback(async () => {
 		const res = await fetch(`/api/modules/${mod.id}`, { cache: "no-store" });
@@ -104,7 +109,12 @@ export function ModulePanel({
 	};
 
 	return (
-		<aside data-testid="module-panel" className="flex h-dvh w-[26rem] shrink-0 flex-col border-l border-border">
+		<aside
+			data-testid="module-panel"
+			className="relative flex h-dvh shrink-0 flex-col border-l border-border"
+			style={{ width: resize.width }}
+		>
+			<ResizeHandle side="left" label="Resize module panel" state={resize} />
 			<div className="flex h-15 shrink-0 items-center border-b border-border px-5">
 				<input
 					value={title}
