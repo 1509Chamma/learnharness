@@ -49,7 +49,7 @@ import { PlanBlock, PlanPopup, latestTree } from "@/components/plan-block";
 import { PlanMarginalia, planExists } from "@/components/plan-window";
 import { MermaidOverlay, SessionMermaidContext } from "@/components/session-overlay";
 import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog";
-import { ArrowRightIcon, DumbbellIcon, WaypointsIcon } from "lucide-react";
+import { ArrowRightIcon, DumbbellIcon, FolderIcon, WaypointsIcon } from "lucide-react";
 import type { PlanBlockData } from "@/src/core";
 import { QuestionDock } from "@/components/question-dock";
 import { SessionFind } from "@/components/session-find";
@@ -57,6 +57,7 @@ import { SessionMessageNavigation } from "@/components/session-navigation";
 import { PracticeDock } from "@/components/practice-dock";
 import { ThinkingCard, type PracticeThinkingData } from "@/components/practice-cards";
 import { GraphContextCard, type GraphContextData } from "@/components/graph-context-card";
+import { ModuleContextCard, type ModuleContextData } from "@/components/module-cards";
 import { TopBar } from "@/components/top-bar";
 import type { ArtifactPartProps, JobRecord, Phase3, QuestionAnswerData, QuestionFormDraft, TurnUsage, SessionPricing } from "@/src/core";
 import type { LhViewMessage } from "@/src/core";
@@ -246,6 +247,7 @@ export function Chat({
 	initiallyCompacting = false,
 	initialConfigured = false,
 	kind = "teach",
+	sidePanel,
 }: {
 	chatId: string;
 	title: string;
@@ -255,7 +257,10 @@ export function Chat({
 	/** The session kind (practice sessions, owner 2026-10-04): practice
 	 *  renders no phase chip (no probe→teach arc applies) and a Practice
 	 *  tag rides the header instead. */
-	kind?: "teach" | "practice";
+	kind?: "teach" | "practice" | "orchestrator";
+	/** A full-height panel beside the transcript (modules: the module page
+	 *  hosts its orchestrator chat with the module panel here). */
+	sidePanel?: React.ReactNode;
 	initialPrompt?: string;
 	/** A teacher turn is running server-side but attached to no client
 	 * (navigated away mid-turn, returned while in flight). */
@@ -1407,10 +1412,20 @@ export function Chat({
 					{/* Practice (owner, 2026-10-04): the coverage ring hides —
 				    practice never extracts, so an ever-filling ring with no
 				    run behind it would lie. */}
-					{kind !== "practice" && <CoverageRing chatId={chatId} refreshKey={coverageTick} />}
+					{kind === "teach" && <CoverageRing chatId={chatId} refreshKey={coverageTick} />}
 					{/* Practice sessions: no phase arc — a quiet Practice tag
 					    instead of the phase chip. */}
-					{kind === "practice" ? (
+					{kind === "orchestrator" ? (
+						<span
+							data-testid="phase-chip"
+							data-phase="module"
+							aria-hidden="true"
+							className="pointer-events-none flex shrink-0 select-none items-center gap-1 text-xs font-medium uppercase tracking-wide text-muted-foreground"
+						>
+							<FolderIcon className="size-3" />
+							Module
+						</span>
+					) : kind === "practice" ? (
 						<span
 							data-testid="phase-chip"
 							data-phase="practice"
@@ -1469,6 +1484,8 @@ export function Chat({
 										switch (part.type) {
 											case "data-graph-context":
 												return <GraphContextCard key={pi} data={part.data as GraphContextData} />;
+											case "data-module-context":
+												return <ModuleContextCard key={pi} data={part.data as ModuleContextData} />;
 											case "data-compaction":
 												return <CompactionMomentDivider key={pi} data={part.data as CompactionDividerData} />;
 											case "data-compaction-cut":
@@ -1811,6 +1828,7 @@ export function Chat({
 				<AbortTurnDialog mode={abortAsk} onClose={() => setAbortAsk(null)} onConfirm={confirmAbort} busy={busy} />
 				</div>
 			</div>
+			{sidePanel}
 		</div>
 		</JobsContext.Provider>
 		</SessionMermaidContext.Provider>

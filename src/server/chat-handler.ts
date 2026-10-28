@@ -1,5 +1,6 @@
 import type { Usage } from "@earendil-works/pi-ai";
 import {
+	createOrchestratorAgent,
 	createPracticeAgent,
 	createProberAgent,
 	createTeacherAgent,
@@ -59,7 +60,8 @@ import {
 	type TurnInput,
 } from "../core/input-events.ts";
 import { steerDelivered } from "../core/contracts.ts";
-import type {CallUsage} from "../core/contracts.ts";
+import type {CallUsage, ChatRecord} from "../core/contracts.ts";
+import { createModuleSession, moduleStateView, updateModule } from "./modules.ts";
 
 /**
  * One chat turn over the server-owned native record. Framework-free (plain
@@ -109,6 +111,11 @@ const jobRunner = createJobRunner({
 /** The app's ONE extraction pipeline instance — both front doors share it:
  *  quiz-triggered session runs (turn-service) and notes imports
  *  (/api/graph/import) hit the same single-flight registry. */
+/** Which prompt group a chat's agent composes (for the context estimate). */
+function promptAgentFor(kind: ChatRecord["kind"]): "practice" | "teacher" | "orchestrator" {
+	return kind === "practice" ? "practice" : kind === "orchestrator" ? "orchestrator" : "teacher";
+}
+
 export const extraction = createExtractionPipeline({
 	...stores,
 	// BYOK (owner, 2026-09-22): the extraction stages resolve the chain —
@@ -261,12 +268,12 @@ export async function handleChatInput(
 			engine: piEngineForSpec(conversation, true),
 			canStart: () => connectionBackgroundAllowed(conversation.provider),
 			modelId: modelIdForCompaction,
-			kind: record.kind === "practice" ? "practice" : hasProbeDone(record.messages) ? "teach" : "probe",
+			kind: record.kind === "practice" ? "practice" : record.kind === "orchestrator" || hasProbeDone(record.messages) ? "teach" : "probe",
 			thresholdTokens: effectiveThresholdTokens(
 				effective.compaction?.thresholdTokens,
 				catalogContextLimits().get(modelIdForCompaction),
 			),
-			systemPromptTokens: Math.ceil(composeInstructions(record.kind === "practice" ? "practice" : "teacher").length / 4),
+			systemPromptTokens: Math.ceil(composeInstructions(promptAgentFor(record.kind)).length / 4),
 		},
 		chatId,
 	);
@@ -441,6 +448,31 @@ export async function handleChatInput(
 	// uniform across kinds).
 	const constructed: TeachingAgent = buildAgent
 		? buildAgent({ ...agentOpts, teaching })
+		: record.kind === "orchestrator"
+			// MODULES (fork feature): a module's orchestrator chat — its own
+			// prompt group and tools; module operations are injected here
+			// (the agent layer never touches the stores).
+			? createOrchestratorAgent(
+					{
+						chatId,
+						moduleState: () => (record.moduleId ? moduleStateView(record.moduleId) : null),
+						createSession: (input) => {
+							if (!record.moduleId) throw new Error("This chat is not attached to a module");
+							return createModuleSession(record.moduleId, input);
+						},
+						updatePlan: (plan) => {
+							if (!record.moduleId) throw new Error("This chat is not attached to a module");
+							updateModule(record.moduleId, { plan });
+						},
+						jobs: {
+							chatId,
+							jobStore: stores.jobStore,
+							spawn: (job, input) => void jobRunner.runJob(job.id, input),
+							searchAvailable,
+						},
+					},
+					agentOpts,
+				)
 		: record.kind === "practice"
 			? createPracticeAgent(
 					{
@@ -581,7 +613,7 @@ export async function handleChatInput(
 				// PRACTICE (owner, 2026-10-04): practice sessions write nothing —
 				// no extraction, no graph, no coverage (v1: the session itself
 				// is the deliverable).
-				if ((!requestCycle || requestCycle.dispatched) && record.kind !== "practice" && extractionEnabled(effective.graph)) {
+				if ((!requestCycle || requestCycle.dispatched) && record.kind !== "practice" && record.kind !== "orchestrator" && extractionEnabled(effective.graph)) {
 					// Fresh per-turn read of the graph section's chunk budget
 					// (extraction-UX redesign, 2026-09-24): the trigger compares
 					// against it and the pipeline's batches share it.
@@ -637,12 +669,12 @@ export async function handleChatInput(
 							engine: kickEngine,
 							canStart: () => connectionBackgroundAllowed(spec.provider),
 							modelId: kickModelId,
-							kind: freshRecord.kind === "practice" ? "practice" : hasProbeDone(freshRecord.messages) ? "teach" : "probe",
+							kind: freshRecord.kind === "practice" ? "practice" : freshRecord.kind === "orchestrator" || hasProbeDone(freshRecord.messages) ? "teach" : "probe",
 							thresholdTokens: effectiveThresholdTokens(
 								fresh.compaction?.thresholdTokens,
 								catalogContextLimits().get(kickModelId),
 							),
-							systemPromptTokens: Math.ceil(composeInstructions(freshRecord.kind === "practice" ? "practice" : "teacher").length / 4),
+							systemPromptTokens: Math.ceil(composeInstructions(promptAgentFor(freshRecord.kind)).length / 4),
 						};
 					}, chatId);
 			},

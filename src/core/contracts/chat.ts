@@ -25,7 +25,9 @@ import type { EmissionStats } from "./graph.ts";
  *  the default and ABSENT on pre-practice records (no migration — absence
  *  reads as teach); "practice" marks an adaptive-practice session — the
  *  practice agent, its two tools, no extraction, no graph writes. */
-export type ChatKind = "teach" | "practice";
+/** "orchestrator" (modules, fork feature): a module's planning chat —
+ *  never listed with the sessions, never extracted into the graph. */
+export type ChatKind = "teach" | "practice" | "orchestrator";
 
 export interface ChatRecord {
 	id: string;
@@ -37,6 +39,10 @@ export interface ChatRecord {
 	kind?: ChatKind;
 	/** The module (folder) this session belongs to — absent = unfiled. */
 	moduleId?: string;
+	/** A short recap of the session (modules): what it covered, where the
+	 *  learner struggled, what comes next — and the record's updatedAt it
+	 *  was written for (stale when the session moved on since). */
+	recap?: { text: string; forUpdatedAt: string };
 	/** The session's plan tree (vision §2) — written by plan tools via saveTree. */
 	tree?: PlanTree;
 	/** Append-only usage log (observability, 2026-09): one entry per model
@@ -267,6 +273,8 @@ export interface ChatSummary {
 	kind: ChatKind;
 	/** The module this session is filed in (absent = unfiled). */
 	moduleId?: string;
+	/** The session recap (modules), when one has been written. */
+	recap?: { text: string; forUpdatedAt: string };
 	messageCount: number;
 	/** The session's current phase, derived from the stored plan tree. */
 	phase: Phase3;

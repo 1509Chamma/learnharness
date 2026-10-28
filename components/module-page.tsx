@@ -1,17 +1,19 @@
 "use client";
 /**
- * The module page (modules, fork feature): the module's goal, its plan and
- * its sessions, plus the doors to start a new session filed into it.
- * Goal and plan save on blur / Done. The page refetches on chats-changed
- * and turn-settled, so sessions moved in or out elsewhere show up live.
+ * The module page (modules, fork feature): the module's orchestrator chat,
+ * with the module panel beside it: name, goal, sessions (with recaps),
+ * plan, and the doors to start a session filed into the module by hand.
+ * Goal and plan save on blur / Done. The panel refetches on chats-changed
+ * and turn-settled, so the orchestrator's plan edits and new sessions show
+ * up live.
  */
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DumbbellIcon, PlusIcon, Trash2Icon } from "lucide-react";
-import type { ChatSummary, ModuleRecord } from "@/src/core";
+import type { ChatSummary, LhMessage, ModuleRecord } from "@/src/core";
 import { MessageResponse } from "@/components/ai-elements/message";
-import { TopBar } from "@/components/top-bar";
+import { Chat } from "@/components/chat";
 import { useServerEvent } from "@/components/server-events";
 import { timeAgo } from "@/components/sidebar";
 import { Button } from "@/components/ui/button";
@@ -23,7 +25,36 @@ const PLAN_PLACEHOLDER = [
 	"- [ ] Lecture 2: Elimination with matrices",
 ].join("\n");
 
+export interface OrchestratorChatProps {
+	chatId: string;
+	title: string;
+	initialMessages: LhMessage[];
+	initialError?: string;
+	initialConfigured: boolean;
+	initiallyInFlight: boolean;
+	initiallyCompacting: boolean;
+}
+
 export function ModulePage({
+	initialModule,
+	initialSessions,
+	orchestrator,
+}: {
+	initialModule: ModuleRecord;
+	initialSessions: ChatSummary[];
+	orchestrator: OrchestratorChatProps;
+}) {
+	return (
+		<Chat
+			key={orchestrator.chatId}
+			kind="orchestrator"
+			{...orchestrator}
+			sidePanel={<ModulePanel initialModule={initialModule} initialSessions={initialSessions} />}
+		/>
+	);
+}
+
+export function ModulePanel({
 	initialModule,
 	initialSessions,
 }: {
@@ -73,8 +104,8 @@ export function ModulePage({
 	};
 
 	return (
-		<div className="flex h-full min-w-0 flex-1 flex-col">
-			<TopBar>
+		<aside data-testid="module-panel" className="flex h-dvh w-[26rem] shrink-0 flex-col border-l border-border">
+			<div className="flex h-15 shrink-0 items-center border-b border-border px-5">
 				<input
 					value={title}
 					aria-label="Module name"
@@ -90,9 +121,9 @@ export function ModulePage({
 					}}
 					className="min-w-0 flex-1 bg-transparent font-prose text-lg outline-none"
 				/>
-			</TopBar>
+			</div>
 			<div className="flex-1 overflow-y-auto">
-				<div className="mx-auto flex max-w-3xl flex-col gap-8 px-6 py-6">
+				<div className="flex flex-col gap-7 px-5 py-5">
 					<section>
 						<h2 className="mb-2 text-xs uppercase tracking-widest text-muted-foreground">Goal</h2>
 						<textarea
@@ -134,7 +165,7 @@ export function ModulePage({
 						</div>
 						{sessions.length === 0 ? (
 							<p className="text-sm text-muted-foreground">
-								No sessions yet. Start one here, or move an existing session in from the sidebar (right-click, Move to).
+								No sessions yet. Ask the orchestrator for one, start one here, or move a session in from the sidebar (right-click, Move to).
 							</p>
 						) : (
 							<ul className="flex flex-col gap-1" data-testid="module-sessions">
@@ -143,9 +174,14 @@ export function ModulePage({
 										<button
 											type="button"
 											onClick={() => router.push(`/chat/${s.id}`)}
-											className="flex w-full items-center gap-3 rounded-lg border border-border/60 px-3 py-2 text-left transition-colors hover:bg-accent"
+											className="flex w-full items-start gap-3 rounded-lg border border-border/60 px-3 py-2 text-left transition-colors hover:bg-accent"
 										>
-											<span className="min-w-0 flex-1 truncate font-prose text-(length:--lh-prose-size)">{s.title}</span>
+											<span className="min-w-0 flex-1">
+												<span className="block truncate font-prose text-(length:--lh-prose-size)">{s.title}</span>
+												{s.recap?.text && (
+													<span className="mt-0.5 line-clamp-3 block text-xs leading-relaxed text-muted-foreground">{s.recap.text}</span>
+												)}
+											</span>
 											{s.kind === "practice" && (
 												<DumbbellIcon className="size-3.5 text-muted-foreground/70" aria-label="Practice session" />
 											)}
@@ -179,14 +215,14 @@ export function ModulePage({
 								aria-label="Module plan"
 								placeholder={PLAN_PLACEHOLDER}
 								onChange={(e) => setPlan(e.target.value)}
-								className="h-72 w-full resize-y rounded-md border border-border bg-background p-3 font-ui text-xs outline-none"
+								className="h-96 w-full resize-y rounded-md border border-border bg-background p-3 font-ui text-xs outline-none"
 							/>
 						) : plan.trim() ? (
 							<div className="rounded-md border border-border/60 p-4">
 								<MessageResponse>{plan}</MessageResponse>
 							</div>
 						) : (
-							<p className="text-sm text-muted-foreground">No plan yet. Add resources and a lecture checklist with Edit.</p>
+							<p className="text-sm text-muted-foreground">No plan yet. The orchestrator keeps it up to date, or add resources and a checklist with Edit.</p>
 						)}
 					</section>
 
@@ -220,6 +256,6 @@ export function ModulePage({
 					</section>
 				</div>
 			</div>
-		</div>
+		</aside>
 	);
 }

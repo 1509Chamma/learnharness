@@ -15,6 +15,7 @@ import {
 	type TeacherToolContext,
 } from "./tools.ts";
 import { practiceTools, type PracticeToolContext } from "./tools/practice.ts";
+import { orchestratorTools, type OrchestratorToolContext } from "./tools/orchestrator.ts";
 import { healToolRecord, withArgumentHeal } from "./tools/heal.ts";
 import { sendToUserTool } from "./tools/send-to-user.ts";
 import { quizInputObject, quizInputProblems } from "../core/question-core.ts";
@@ -49,7 +50,7 @@ import { usageWasAdmitted } from "./subscription-request-cycle.ts";
 
 /** Which agent's prompt directory to compose. Practice (2026-10-04)
  *  composes ONLY its own directory — see prompt-segments.ts. */
-export type AgentKind = "prober" | "teacher" | "practice";
+export type AgentKind = "prober" | "teacher" | "practice" | "orchestrator";
 
 // P2 (2026-09-19): segment discovery + override resolution live in ONE
 // canonical place now — src/store/prompt-overrides.ts (listSourceSegments
@@ -102,6 +103,7 @@ const composedInstructions: Record<AgentKind, string> = {
 	prober: composeInstructions("prober"),
 	teacher: composeInstructions("teacher"),
 	practice: composeInstructions("practice"),
+	orchestrator: composeInstructions("orchestrator"),
 };
 
 // Money channel (wave 4): the chat-handler passes a per-turn collector;
@@ -353,8 +355,16 @@ export function createPracticeAgent(ctx: PracticeToolContext, opts: AgentBuildOp
 	return baseAgentOptions("practice", opts, Object.values(tools));
 }
 
+/** The module orchestrator (modules, fork feature): its own prompt group
+ *  and the orchestrator tool set — never a teaching agent. */
+export function createOrchestratorAgent(ctx: OrchestratorToolContext, opts: AgentBuildOptions = {}) {
+	const tools = opts.tools ?? orchestratorTools(ctx);
+	return baseAgentOptions("orchestrator", opts, Object.values(tools));
+}
+
 export type ProberAgent = ReturnType<typeof createProberAgent>;
 export type TeacherAgent = ReturnType<typeof createTeacherAgent>;
 export type PracticeAgent = ReturnType<typeof createPracticeAgent>;
-export type TeachingAgent = ProberAgent | TeacherAgent | PracticeAgent;
+export type OrchestratorAgent = ReturnType<typeof createOrchestratorAgent>;
+export type TeachingAgent = ProberAgent | TeacherAgent | PracticeAgent | OrchestratorAgent;
 

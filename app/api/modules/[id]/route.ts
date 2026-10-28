@@ -3,7 +3,7 @@
  * PATCH /api/modules/[id] {title?, goal?, plan?} — edit.
  * DELETE /api/modules/[id] — remove it; its sessions become unfiled.
  */
-import { chatStore, deleteModule, getModule, updateModule } from "@/src/server";
+import { deleteModule, getModule, moduleSessions, updateModule } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +13,7 @@ export async function GET(_req: Request, { params }: Params) {
 	const { id } = await params;
 	const mod = getModule(id);
 	if (!mod) return Response.json({ error: "module not found" }, { status: 404 });
-	const sessions = chatStore.listChats().filter((c) => c.moduleId === id);
+	const sessions = moduleSessions(id);
 	return Response.json({ module: mod, sessions });
 }
 

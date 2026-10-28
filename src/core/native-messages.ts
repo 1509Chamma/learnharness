@@ -67,6 +67,7 @@ export interface LhMarkerMessage {
 	role: "custom";
 	customType:
 		| "graph-context"
+		| "module-context"
 		| "probe-handoff"
 		| "subagent-steer"
 		| "subagent-abort"
@@ -282,6 +283,50 @@ export function newGraphContextMessage(picks: readonly GraphContextPick[], chain
 		content: lines.join("\n"),
 		display: true,
 		details: { propositions: picks, chains },
+		timestamp: Date.now(),
+	};
+}
+
+/** What a module-context marker shows the learner (its collapsible card). */
+export interface ModuleContextDetails {
+	moduleId: string;
+	moduleTitle: string;
+	brief: string;
+}
+
+/**
+ * The module briefing (modules, fork feature): a session the module
+ * orchestrator creates starts with this marker — the module's goal and
+ * plan plus the orchestrator's brief for THIS session (source, scope, mode,
+ * what earlier sessions found). Like graph-context it flattens to a
+ * user-role message on the wire, bracketed as injected context.
+ */
+export function newModuleContextMessage(input: {
+	moduleId: string;
+	moduleTitle: string;
+	goal: string;
+	plan: string;
+	brief: string;
+	recaps?: ReadonlyArray<{ title: string; recap: string }>;
+}): LhMarkerMessage {
+	const lines = [
+		`[Session context] — this session belongs to the learner's module "${input.moduleTitle}". The module orchestrator set it up with this brief:`,
+		"",
+		input.brief.trim(),
+	];
+	if (input.goal.trim()) lines.push("", "Module goal:", input.goal.trim());
+	if (input.plan.trim()) lines.push("", "Module plan (progress so far):", input.plan.trim());
+	if (input.recaps && input.recaps.length > 0) {
+		lines.push("", "Recaps of earlier sessions in this module:");
+		for (const r of input.recaps) lines.push(`- ${r.title}: ${r.recap}`);
+	}
+	return {
+		id: newMessageId(),
+		role: "custom",
+		customType: "module-context",
+		content: lines.join("\n"),
+		display: true,
+		details: { moduleId: input.moduleId, moduleTitle: input.moduleTitle, brief: input.brief.trim() } satisfies ModuleContextDetails,
 		timestamp: Date.now(),
 	};
 }
@@ -755,7 +800,7 @@ export function nativeInputCause(message: AgentMessage, history: readonly AgentM
 	if (message.role === "custom") {
 		if (["probe-handoff", "subagent-steer", "subagent-abort"].includes(message.customType)) return "automatic";
 		if (["practice-thinking", "practice-next"].includes(message.customType)) return "learner";
-		return ["graph-context", "plan-block", "problem-dismissed", "compaction"].includes(message.customType) ? "neutral" : "unrecognizable";
+		return ["graph-context", "module-context", "plan-block", "problem-dismissed", "compaction"].includes(message.customType) ? "neutral" : "unrecognizable";
 	}
 	if (message.role === "toolResult") {
 		if (!(QUESTION_TOOLS as readonly string[]).includes(message.toolName) || message.isError || message.details == null || (message.details as { dismissed?: boolean }).dismissed) return "neutral";

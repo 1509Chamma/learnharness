@@ -6,6 +6,7 @@ import { VisualCard } from "@/components/artifacts/visual-card";
 import { ProbeDoneCard } from "@/components/artifacts/probe-done-card";
 import { ToolCallCard } from "@/components/artifacts/tool-call-card";
 import { ProblemCard, ConcludeCard } from "@/components/practice-cards";
+import { CreatedSessionCard } from "@/components/module-cards";
 
 /**
  * Artifact renderer registry — the extension point for tool-part UI.
@@ -34,6 +35,11 @@ export const artifactRenderers: Record<string, ComponentType<ArtifactPartProps>>
 	// The learner-filesystem set (sources v1): one quiet expandable
 	// tool-call card each — collapsed one-liner (tool name + headline
 	// argument), full input/output on expand.
+	// Module orchestrator (modules, fork feature): the created session as a
+	// card with its Open button; the state/plan tools as quiet call cards.
+	create_session: CreatedSessionCard,
+	module_state: ToolCallCard,
+	update_module_plan: ToolCallCard,
 	read: ToolCallCard,
 	ls: ToolCallCard,
 	find: ToolCallCard,

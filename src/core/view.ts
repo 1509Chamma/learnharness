@@ -381,6 +381,16 @@ function projectMarker(marker: LhMarkerMessage, out: LhViewMessage[]): void {
 			});
 			return;
 		}
+		case "module-context": {
+			// The module briefing (modules): a collapsible card like the
+			// graph context — scaffolding, never a text bubble.
+			out.push({
+				id: marker.id,
+				role: "user",
+				parts: [{ type: "data-module-context", id: `mc_${marker.id}`, data: marker.details }],
+			});
+			return;
+		}
 		case "probe-handoff": {
 			out.push({
 				id: marker.id,
