@@ -18,8 +18,12 @@ npm install          # once
 npm run dev          # http://localhost:3000
 npm run build        # production build (standalone output)
 npm start            # serve the production build
+npm run app          # build + serve in one step — use this to STUDY from source:
+                     # next dev compiles each route on first visit (seconds per page)
 
-npm test             # the full suite (node:test via tsx; deterministic, no LLM, no network)
+npm test             # the full suite (node:test via tsx; deterministic, no LLM, no network;
+                     # scripts/test.mjs — cross-platform, runs against a temp LH_DATA_DIR
+                     # so it never writes into data/; `npm test -- tests/x.test.ts` for one file)
 npm run lint         # eslint — includes the import law (architecture §2)
 npm run typecheck    # tsc --noEmit
 node scripts/smoke-web-subscriptions.mjs # after build: offline Next start/dev + reload gate
