@@ -19,12 +19,14 @@ import type {
 	BackgroundModelRole,
 	CompactionSettings,
 	GeneralSettings,
+	StorageSettings,
 	DictationSettings,
 	GraphSettings,
 	ModelsSettings,
 	RoleModelOverride,
 } from "../core/settings.ts";
-import { BACKGROUND_MODEL_ROLES, COMPACTION_THRESHOLD_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, LEARNER_PROFILE_MAX, MODEL_SLOTS } from "../core/settings.ts";
+import { BACKGROUND_MODEL_ROLES, COMPACTION_THRESHOLD_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, LEARNER_PROFILE_MAX, MODEL_SLOTS, STORAGE_PATH_MAX } from "../core/settings.ts";
+import path from "node:path";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 import { isDictationLanguage } from "../core/dictation.ts";
 
@@ -75,6 +77,25 @@ export function parseSettingsBody(body: unknown): SettingsBodyResult<ChatSetting
 function asRecord(body: unknown): Record<string, unknown> | null {
 	if (!body || typeof body !== "object" || Array.isArray(body)) return null;
 	return body as Record<string, unknown>;
+}
+
+/** storage: { backupFolder?, obsidianFolder? } — absolute paths; an empty
+ *  string clears that folder (switching the feature off). */
+export function parseStorageSettingsBody(body: unknown): SettingsBodyResult<StorageSettings> {
+	const raw = asRecord(body);
+	if (!raw) return { ok: false, error: "Invalid JSON body" };
+	const settings: StorageSettings = {};
+	for (const key of ["backupFolder", "obsidianFolder"] as const) {
+		const value = raw[key];
+		if (value === undefined) continue;
+		if (typeof value !== "string") return { ok: false, error: `${key} must be a string` };
+		const folder = value.trim();
+		if (!folder) continue;
+		if (folder.length > STORAGE_PATH_MAX) return { ok: false, error: `${key} must be at most ${STORAGE_PATH_MAX} characters` };
+		if (!path.isAbsolute(folder)) return { ok: false, error: `${key} must be an absolute folder path` };
+		settings[key] = folder;
+	}
+	return { ok: true, settings };
 }
 
 /** general: { autoUpdate?: boolean } */
@@ -397,6 +418,7 @@ export function parseDictationSettingsBody(body: unknown): SettingsBodyResult<Di
  *  carries the special prompts sub-resource). */
 export const SETTINGS_SECTIONS = {
 	general: parseGeneralSettingsBody,
+	storage: parseStorageSettingsBody,
 	chat: parseSettingsBody,
 	agent: parseAgentSettingsBody,
 	appearance: parseAppearanceSettingsBody,

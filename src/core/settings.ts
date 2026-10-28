@@ -236,6 +236,18 @@ export interface GeneralSettings {
 	autoUpdate?: boolean;
 }
 
+/** Where the app copies your knowledge outside itself (fork feature).
+ *  Each folder is an absolute path; absent or empty = that feature off. */
+export interface StorageSettings {
+	/** Daily snapshots of the data folder go here (e.g. a Google Drive folder). */
+	backupFolder?: string;
+	/** The Obsidian export writes its notes here (a folder inside a vault). */
+	obsidianFolder?: string;
+}
+
+/** Longest accepted folder path. */
+export const STORAGE_PATH_MAX = 500;
+
 /** One app-wide dictation preference, shared by every composer. */
 export interface DictationSettings {
 	language?: DictationLanguage;
@@ -381,6 +393,7 @@ export interface UserSettings {
 	appearance?: AppearanceSettings;
 	graph?: GraphSettings;
 	compaction?: CompactionSettings;
+	storage?: StorageSettings;
 	[key: string]: unknown;
 }
 
@@ -452,6 +465,15 @@ function sanitizeHexOrNull(value: unknown): string | null {
 
 const boolOrDrop = (value: unknown): boolean | undefined =>
 	typeof value === "boolean" ? value : undefined;
+
+function sanitizeStorage(raw: Record<string, unknown>): StorageSettings {
+	const out: StorageSettings = {};
+	for (const key of ["backupFolder", "obsidianFolder"] as const) {
+		const value = raw[key];
+		if (typeof value === "string" && value.trim() && value.length <= STORAGE_PATH_MAX) out[key] = value.trim();
+	}
+	return out;
+}
 
 function sanitizeGeneral(raw: Record<string, unknown>): GeneralSettings {
 	const out: GeneralSettings = {};
@@ -633,6 +655,9 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 	};
 	if (r.general !== null && typeof r.general === "object" && !Array.isArray(r.general)) {
 		out.general = sanitizeGeneral(r.general as Record<string, unknown>);
+	}
+	if (r.storage !== null && typeof r.storage === "object" && !Array.isArray(r.storage)) {
+		out.storage = sanitizeStorage(r.storage as Record<string, unknown>);
 	}
 	if (r.dictation !== undefined) {
 		const raw = r.dictation;

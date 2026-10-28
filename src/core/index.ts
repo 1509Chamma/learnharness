@@ -82,3 +82,4 @@ export * from "./coverage.ts";
 // export share it. Pure, browser-safe.
 export * from "./session-markdown.ts";
 export * from "./anki-status.ts"; // Anki sync status (fork feature)
+export * from "./storage-status.ts"; // backup / Obsidian export status (fork feature)

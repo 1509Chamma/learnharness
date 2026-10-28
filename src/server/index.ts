@@ -48,5 +48,7 @@ export { sessionCost } from "./pricing.ts";
 // Modules — folders of sessions (fork feature).
 export * from "./modules.ts";
 export { refreshModuleRecaps } from "./recaps.ts";
+// Backups to a folder of the learner's choosing (fork feature).
+export { backUpNow, backupStatus } from "./backup.ts";
 // Anki sync (fork feature): importing it starts the background trigger.
 export { ankiStatus, syncAnki, scheduleAnkiSync } from "./anki.ts";

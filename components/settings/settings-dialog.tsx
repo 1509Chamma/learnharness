@@ -35,6 +35,7 @@ import {
 	CURRENT_SETTINGS_VERSION,
 	type AgentSettings,
 	type AppearanceSettings,
+	type StorageSettings,
 	type CompactionSettings,
 	type GraphSettings,
 	type UserSettings,
@@ -51,6 +52,7 @@ import { Hint } from "@/components/ui/hint";
 import { AppearanceSection, GraphSection } from "./appearance-section.tsx";
 import { KeyboardSection } from "./keyboard-section.tsx";
 import { AnkiSection } from "./anki-section.tsx";
+import { StorageSection } from "./storage-section.tsx";
 import { ChatGPTUIProvider } from "./chatgpt-connection.tsx";
 import { NativeSubscriptionUIProvider } from "./subscription-connections.tsx";
 
@@ -64,6 +66,7 @@ const SECTIONS = [
 	{ id: "graph", label: "Graph" },
 	{ id: "keyboard", label: "Keyboard", hint: "Stored on this device" },
 	{ id: "anki", label: "Anki" },
+	{ id: "storage", label: "Storage" },
 	{ id: "general", label: "General" },
 ] as const;
 type SectionId = (typeof SECTIONS)[number]["id"];
@@ -228,7 +231,7 @@ export function SettingsDialogBody({
 	 *  schema mistake caught by the validation surface). */
 	const write = useCallback(
 		async (
-			section: "general" | "agent" | "models" | "appearance" | "graph" | "compaction",
+			section: "general" | "agent" | "models" | "appearance" | "graph" | "compaction" | "storage",
 			body: object,
 		) => {
 			setError(null);
@@ -367,6 +370,14 @@ export function SettingsDialogBody({
 										onAutoUpdateChange={(on) =>
 											void write("general", { ...record.general, autoUpdate: on })
 										}
+									/>
+								</SettingsSection>
+							)}
+							{active === "storage" && (
+								<SettingsSection title="Storage" testid="section-storage">
+									<StorageSection
+										storage={record.storage}
+										onChange={(next: StorageSettings) => write("storage", next)}
 									/>
 								</SettingsSection>
 							)}
