@@ -19,7 +19,8 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { fuzzyScore } from "@/src/core";
 import { useServerEvent, useServerResync } from "@/components/server-events";
-import type { ChatListItem } from "@/src/core";
+import type { ChatListItem, ModuleSummary } from "@/src/core";
+import { ModuleRow, ModulesHeader, MoveToModuleItems, NewModuleInput, sidebarRows, useExpandedModules } from "@/components/sidebar-modules";
 import { kbdEventForAction } from "@/src/core";
 import { notifySettingsSaved } from "@/components/settings-signal";
 
@@ -389,6 +390,8 @@ const KIND_FILTER_KEY = "lh:session-kind-filter";
 function SessionsSidebar() {
 	const { open, toggle } = useSidebar();
 	const [chats, setChats] = useState<ChatListItem[] | null>(null);
+	const [modules, setModules] = useState<ModuleSummary[]>([]);
+	const [addingModule, setAddingModule] = useState(false);
 	const [query, setQuery] = useState("");
 	const [kindFilter, setKindFilter] = useState<SessionKindFilter>("all");
 	useEffect(() => {
@@ -414,20 +417,36 @@ function SessionsSidebar() {
 	/* FUZZY (owner round 8, 2026-10-05): subsequence match ranked by
 	 * fuzzyScore — prefix beats word-boundary beats scattered. Empty query
 	 * keeps the natural list order (scores are all 0, sort is stable). */
+	// Modules (fork feature): with no query the list is grouped — expanded
+	// modules' sessions first, then the unfiled ones — and `shown` is the
+	// session rows in that visual order (the keyboard walk's sequence). A
+	// query searches every session flat, folders ignored.
+	const activeModuleId = useMemo(() => {
+		const m = /^\/module\/([^/]+)/.exec(pathname ?? "");
+		if (m) return m[1]!;
+		const chatId = /^\/chat\/([^/]+)/.exec(pathname ?? "")?.[1];
+		return chats?.find((c) => c.id === chatId)?.moduleId ?? null;
+	}, [pathname, chats]);
+	const { expanded, toggle: toggleModule } = useExpandedModules(activeModuleId);
+	const kindFiltered = useMemo(
+		() => (chats && kindFilter !== "all" ? chats.filter((c) => (c.kind ?? "teach") === kindFilter) : chats),
+		[chats, kindFilter],
+	);
+	const grouped = useMemo(
+		() => (kindFiltered ? sidebarRows(kindFiltered, modules, expanded) : null),
+		[kindFiltered, modules, expanded],
+	);
 	const shown = useMemo(() => {
 		const q = query.trim();
-		let list = chats;
-		if (list && kindFilter !== "all") {
-			list = list.filter((c) => (c.kind ?? "teach") === kindFilter);
-		}
+		const list = kindFiltered;
 		if (!list) return list;
-		if (!q) return list;
+		if (!q) return grouped!.rows;
 		return list
 			.map((c) => ({ c, score: fuzzyScore(q, c.title) }))
 			.filter((r): r is { c: (typeof list)[number]; score: number } => r.score !== null)
 			.sort((a, b) => b.score - a.score)
 			.map((r) => r.c);
-	}, [chats, query, kindFilter]);
+	}, [kindFiltered, grouped, query]);
 
 	const refreshInFlightRef = useRef(false);
 	const refresh = useCallback(async () => {
@@ -437,9 +456,13 @@ function SessionsSidebar() {
 		if (refreshInFlightRef.current) return;
 		refreshInFlightRef.current = true;
 		try {
-			const res = await fetch("/api/chats", { cache: "no-store" });
+			const [res, modRes] = await Promise.all([
+				fetch("/api/chats", { cache: "no-store" }),
+				fetch("/api/modules", { cache: "no-store" }),
+			]);
 			const d = (await res.json()) as { chats: ChatListItem[] };
 			setChats(d.chats);
+			if (modRes.ok) setModules(((await modRes.json()) as { modules: ModuleSummary[] }).modules);
 		} catch {
 			// a transient failure keeps the last snapshot
 			setChats((prev) => prev ?? []);
@@ -632,7 +655,7 @@ function SessionsSidebar() {
 	// buttons, so the index matches).
 	useEffect(() => {
 		if (kbdIndex === null) return;
-		listRef.current?.querySelectorAll("button")[kbdIndex]?.scrollIntoView({ block: "nearest" });
+		listRef.current?.querySelectorAll("[data-testid^='session-row']")[kbdIndex]?.scrollIntoView({ block: "nearest" });
 	}, [kbdIndex]);
 
 	useEffect(() => {
@@ -641,6 +664,63 @@ function SessionsSidebar() {
 		// Opening + navigation refetch; while open, the events channel owns
 		// freshness (S6) — no interval, nothing standing.
 	}, [open, pathname, refresh]);
+
+	// One session row, wherever it sits (a module folder, unfiled, or flat
+	// search results); the walk index is its position in `shown`.
+	const renderSession = (c: ChatListItem) =>
+		renamingId === c.id ? (
+			<RenameRow
+				key={c.id}
+				chat={c}
+				onCommit={(next) => void commitRename(c.id, next)}
+				onCancel={() => setRenamingId(null)}
+			/>
+		) : (
+			<SessionRow
+				key={c.id}
+				chat={c}
+				active={pathname === `/chat/${c.id}`}
+				kbdSelected={kbdIndex !== null && shown?.[kbdIndex]?.id === c.id}
+				onOpen={() => {
+					setKbdIndex(null);
+					router.push(`/chat/${c.id}`);
+				}}
+				onContextMenu={(e) => openContext(e, c)}
+			/>
+		);
+
+	const createModule = async (title: string) => {
+		setAddingModule(false);
+		try {
+			const res = await fetch("/api/modules", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ title }),
+			});
+			if (!res.ok) throw new Error(`create module failed: ${res.status}`);
+			const created = (await res.json()) as { id: string };
+			void refresh();
+			router.push(`/module/${created.id}`);
+		} catch (err) {
+			console.error(err);
+		}
+	};
+
+	const moveSession = async (chatId: string, moduleId: string | null) => {
+		setCtxChatId(null);
+		try {
+			const res = await fetch(`/api/chats/${chatId}/module`, {
+				method: "PUT",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ moduleId }),
+			});
+			if (!res.ok) throw new Error(`move failed: ${res.status}`);
+			setChats((prev) => (prev ? prev.map((c) => (c.id === chatId ? { ...c, moduleId: moduleId ?? undefined } : c)) : prev));
+			void refresh();
+		} catch (err) {
+			console.error(err);
+		}
+	};
 
 	return (
 		<aside
@@ -806,33 +886,47 @@ function SessionsSidebar() {
 				<div ref={listRef} className="flex-1 overflow-y-auto p-2">
 					{shown === null ? (
 						<div className="px-2 py-4 text-xs text-muted-foreground">Loading…</div>
-					) : shown.length === 0 ? (
-						<div className="px-2 py-4 text-xs text-muted-foreground">
-							{query.trim() ? "No sessions match." : "No sessions yet."}
-						</div>
-					) : (
-						shown.map((c, i) =>
-							renamingId === c.id ? (
-								<RenameRow
-									key={c.id}
-									chat={c}
-									onCommit={(next) => void commitRename(c.id, next)}
-									onCancel={() => setRenamingId(null)}
-								/>
-							) : (
-								<SessionRow
-									key={c.id}
-									chat={c}
-									active={pathname === `/chat/${c.id}`}
-									kbdSelected={i === kbdIndex}
-									onOpen={() => {
-										setKbdIndex(null);
-										router.push(`/chat/${c.id}`);
-									}}
-									onContextMenu={(e) => openContext(e, c)}
-								/>
-							),
+					) : query.trim() ? (
+						shown.length === 0 ? (
+							<div className="px-2 py-4 text-xs text-muted-foreground">No sessions match.</div>
+						) : (
+							shown.map((c) => renderSession(c))
 						)
+					) : (
+						<>
+							<ModulesHeader onAdd={() => setAddingModule(true)} />
+							{addingModule && (
+								<NewModuleInput onCreate={(t) => void createModule(t)} onCancel={() => setAddingModule(false)} />
+							)}
+							{grouped!.groups.map(({ module: m, sessions }) => (
+								<div key={m.id}>
+									<ModuleRow
+										module={m}
+										expanded={expanded.has(m.id)}
+										active={pathname === `/module/${m.id}`}
+										onToggle={() => toggleModule(m.id)}
+										onOpen={() => router.push(`/module/${m.id}`)}
+									/>
+									{expanded.has(m.id) && (
+										<div className="ml-4 border-l border-border/60 pl-1">
+											{sessions.length === 0 ? (
+												<div className="px-3 py-1.5 text-xs text-muted-foreground/70">No sessions yet.</div>
+											) : (
+												sessions.map((c) => renderSession(c))
+											)}
+										</div>
+									)}
+								</div>
+							))}
+							<div className="mb-1 mt-3 px-1 text-xs uppercase tracking-widest text-muted-foreground/70">Unfiled</div>
+							{grouped!.unfiled.length === 0 ? (
+								<div className="px-2 py-2 text-xs text-muted-foreground">
+									{(chats?.length ?? 0) === 0 ? "No sessions yet." : "Every session is in a module."}
+								</div>
+							) : (
+								grouped!.unfiled.map((c) => renderSession(c))
+							)}
+						</>
 					)}
 				</div>
 
@@ -911,6 +1005,12 @@ function SessionsSidebar() {
 						>
 							Export as Markdown…
 						</button>
+						<MoveToModuleItems
+							modules={modules}
+							current={chats?.find((c) => c.id === ctxChatId)?.moduleId}
+							onMove={(moduleId) => void moveSession(ctxChatId, moduleId)}
+						/>
+						<div className="my-0.5 border-t border-border/60" aria-hidden="true" />
 						<button
 							type="button"
 							data-testid="ctx-delete"

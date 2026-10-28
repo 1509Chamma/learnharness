@@ -81,6 +81,19 @@ export function composeInstructions(kind: AgentKind, switches?: Record<string, b
 		.join("\n\n---\n\n");
 }
 
+/** The learner profile as the prompt's closing section (fork feature) —
+ *  last, so the shared prefix stays cacheable across profile edits. */
+export function withLearnerProfile(systemPrompt: string, profile?: string): string {
+	const text = profile?.trim();
+	return text ? `${systemPrompt}
+
+---
+
+## The learner, in their own words
+
+${text}` : systemPrompt;
+}
+
 // The switch-free source composition, cached per kind (module-load once).
 // With promptSwitches provided, baseAgentOptions composes FRESH per turn —
 // an override file written while its switch is ON must flip the next
@@ -121,6 +134,9 @@ export interface AgentBuildOptions {
 	 *  fresh per turn, honoring enabled overrides (switch on + file
 	 *  exists); absent → the cached pure-source composition. */
 	promptSwitches?: Record<string, boolean>;
+	/** The learner's profile (settings agent.learnerProfile) — appended to
+	 *  the system prompt as its own section when non-empty. */
+	learnerProfile?: string;
 	/** Native conversation identity: the existing persisted chat id, reused
 	 * across reconstructed prober, teacher, and practice Agents.
 	 * Debug: when set AND LH_PROVIDER_EVENTS=1, raw provider stream events
@@ -181,9 +197,10 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 	// ("practice" is not a ModelRole) honest about that.
 	const engine = opts.engine ?? piEngineFor(kind as "prober" | "teacher");
 	const stopper = makeQuestionStopper(kind);
-	const systemPrompt = opts.promptSwitches
-		? composeInstructions(kind, opts.promptSwitches)
-		: composedInstructions[kind]!;
+	const systemPrompt = withLearnerProfile(
+		opts.promptSwitches ? composeInstructions(kind, opts.promptSwitches) : composedInstructions[kind]!,
+		opts.learnerProfile,
+	);
 	// Debug recorder (owner, 2026-10-04): raw provider events when
 	// LH_PROVIDER_EVENTS=1 and the caller handed a chatId; undefined is
 	// the normal no-observer path (tests, env-off).

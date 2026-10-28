@@ -45,5 +45,7 @@ export * from "./observability.ts";
 export * from "./model-catalog.ts";
 export { subscriptionControlsResponse, subscriptionBrowserResponse } from "./web-subscription-http.ts";
 export { sessionCost } from "./pricing.ts";
+// Modules — folders of sessions (fork feature).
+export * from "./modules.ts";
 // Anki sync (fork feature): importing it starts the background trigger.
 export { ankiStatus, syncAnki, scheduleAnkiSync } from "./anki.ts";

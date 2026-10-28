@@ -24,7 +24,7 @@ import type {
 	ModelsSettings,
 	RoleModelOverride,
 } from "../core/settings.ts";
-import { BACKGROUND_MODEL_ROLES, COMPACTION_THRESHOLD_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
+import { BACKGROUND_MODEL_ROLES, COMPACTION_THRESHOLD_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, LEARNER_PROFILE_MAX, MODEL_SLOTS } from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 import { isDictationLanguage } from "../core/dictation.ts";
 
@@ -196,6 +196,13 @@ export function parseAgentSettingsBody(body: unknown): SettingsBodyResult<AgentS
 			return { ok: false, error: "graphTools.enabled must be a boolean" };
 		}
 		settings.graphTools = graphTools.enabled === undefined ? {} : { enabled: graphTools.enabled };
+	}
+	if (raw.learnerProfile !== undefined) {
+		if (typeof raw.learnerProfile !== "string") return { ok: false, error: "learnerProfile must be a string" };
+		if (raw.learnerProfile.length > LEARNER_PROFILE_MAX) {
+			return { ok: false, error: `learnerProfile must be at most ${LEARNER_PROFILE_MAX} characters` };
+		}
+		if (raw.learnerProfile.trim()) settings.learnerProfile = raw.learnerProfile;
 	}
 	return { ok: true, settings };
 }

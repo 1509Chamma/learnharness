@@ -215,6 +215,18 @@ function renameChat(id: string, title: string): ChatRecord {
 	return record;
 }
 
+/** File a session into a module or unfile it (modules, fork feature). Like
+ *  a rename it is list SHAPE, not conversation activity: updatedAt stays,
+ *  chats-changed fires. */
+function setModule(id: string, moduleId: string | null): void {
+	const record = getChat(id);
+	if (!record) throw new Error(`Chat not found: ${id}`);
+	if (moduleId) record.moduleId = moduleId;
+	else delete record.moduleId;
+	writeChat(record);
+	emit("chats-changed", {});
+}
+
 /** Delete the session record file entirely (session-deletion wave 6,
  *  owner 2026-09-22). False when the id is unknown — the route turns that
  *  into a 404. The record's graph traces and jobs are the route's
@@ -248,6 +260,7 @@ export const chatStore: ChatStore = {
 	saveTree,
 	saveSettings,
 	renameChat,
+	setModule,
 	deleteChat,
 	appendTurnUsage,
 	appendExtractionUsage,

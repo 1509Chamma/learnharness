@@ -4,6 +4,8 @@ interface SessionCreation {
 	title: string;
 	kind?: "practice";
 	graphContext?: { propositions: readonly { id: string; name: string; statement: string }[] };
+	/** File the new session into this module (modules, fork feature). */
+	moduleId?: string;
 }
 
 /** Per source-composer instance. Retain a successful creation if storage

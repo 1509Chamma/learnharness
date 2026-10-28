@@ -268,7 +268,14 @@ export interface AgentSettings {
 	 *  route); the switch is explicit so users keep a file on disk but run
 	 *  the source default to compare (owner decision 2026-09-19). */
 	prompts?: Record<string, boolean>;
+	/** The learner's own profile (fork feature): background, goals, how
+	 *  they learn — free text every agent sees, appended to its system
+	 *  prompt. Absent or empty = no profile section. */
+	learnerProfile?: string;
 }
+
+/** The learner profile's size cap (characters). */
+export const LEARNER_PROFILE_MAX = 8_000;
 
 /** Markdown-rendering knobs — the bare-bones set (owner decision). */
 export interface MdRenderingSettings {
@@ -536,6 +543,9 @@ function sanitizeAgent(raw: Record<string, unknown>): AgentSettings {
 		const enabled = (raw.graphTools as Record<string, unknown>).enabled;
 		if (enabled === undefined) out.graphTools = {};
 		else if (typeof enabled === "boolean") out.graphTools = { enabled };
+	}
+	if (typeof raw.learnerProfile === "string" && raw.learnerProfile.trim()) {
+		out.learnerProfile = raw.learnerProfile.slice(0, LEARNER_PROFILE_MAX);
 	}
 	return out;
 }

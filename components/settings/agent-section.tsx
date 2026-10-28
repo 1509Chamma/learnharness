@@ -60,6 +60,7 @@ import { Hint } from "@/components/ui/hint";
 import type React from "react";
 import {
 	COMPACTION_THRESHOLD_FLOOR,
+	LEARNER_PROFILE_MAX,
 	MODEL_SLOTS,
 	resolveSettings,
 	type AgentSettings,
@@ -265,6 +266,34 @@ function MenuTrigger({
  * testid (the section's one-ref pattern), opening DOWN with the shell's
  * viewport cap and auto-flip. data-lh-menu rides the shell — the
  * outside-click contract's exemption mark. */
+
+/** The learner profile (fork feature): free text every agent sees. Saves on
+ *  blur, so typing never fires a PUT per keystroke. */
+export function LearnerProfileField({ value, onSave }: { value: string; onSave: (text: string) => void }) {
+	const [draft, setDraft] = useState(value);
+	useEffect(() => setDraft(value), [value]);
+	return (
+		<div data-testid="learner-profile">
+			<p className="mb-1 text-xs text-muted-foreground/70">
+				Your background, goals and how you learn. Every tutor and module orchestrator reads it.
+			</p>
+			<textarea
+				value={draft}
+				maxLength={LEARNER_PROFILE_MAX}
+				onChange={(e) => setDraft(e.target.value)}
+				onBlur={() => {
+					if (draft !== value) onSave(draft);
+				}}
+				aria-label="Learner profile"
+				placeholder="e.g. Aiming to be strong at machine learning and mathematics, with the economics behind finance…"
+				className="h-40 w-full resize-y rounded-sm border border-border bg-background p-2 font-prose text-(length:--lh-prose-size) text-foreground outline-none"
+			/>
+			<p className="mt-1 text-right text-xs text-muted-foreground/60">
+				{draft.length.toLocaleString()} / {LEARNER_PROFILE_MAX.toLocaleString()}
+			</p>
+		</div>
+	);
+}
 
 export function AgentSection({
 	agent,
@@ -580,6 +609,17 @@ export function AgentSection({
 
 	return (
 		<>
+			<SettingsGroup label="Learner profile" testid="group-learner-profile">
+				<LearnerProfileField
+					value={agent?.learnerProfile ?? ""}
+					onSave={(text) => {
+						const next: AgentSettings = { ...agent };
+						if (text.trim()) next.learnerProfile = text;
+						else delete next.learnerProfile;
+						onSectionChange(next);
+					}}
+				/>
+			</SettingsGroup>
 			<SettingsGroup label="Models" testid="group-models">
 				{catalogFailed && <p role="alert" className="text-xs text-red-400">Model catalog could not be loaded. Check the connection and retry. <button type="button" className="underline" onClick={refreshCatalog}>Retry</button></p>}
 				{MODEL_SLOTS.map((slot) => {
