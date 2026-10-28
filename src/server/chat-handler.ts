@@ -62,6 +62,7 @@ import {
 import { steerDelivered } from "../core/contracts.ts";
 import type {CallUsage, ChatRecord} from "../core/contracts.ts";
 import { createModuleSession, moduleStateView, updateModule } from "./modules.ts";
+import { refreshModuleRecaps } from "./recaps.ts";
 
 /**
  * One chat turn over the server-owned native record. Framework-free (plain
@@ -455,7 +456,13 @@ export async function handleChatInput(
 			? createOrchestratorAgent(
 					{
 						chatId,
-						moduleState: () => (record.moduleId ? moduleStateView(record.moduleId) : null),
+						// Stale session recaps are refreshed before the read, so
+						// the orchestrator always sees what sessions covered.
+						moduleState: async () => {
+							if (!record.moduleId) return null;
+							await refreshModuleRecaps(record.moduleId);
+							return moduleStateView(record.moduleId);
+						},
 						createSession: (input) => {
 							if (!record.moduleId) throw new Error("This chat is not attached to a module");
 							return createModuleSession(record.moduleId, input);

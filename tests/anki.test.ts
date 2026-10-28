@@ -112,6 +112,12 @@ function fakeAnki() {
 			case "addTags":
 				for (const id of p.notes as number[]) notes.get(id)!.tags.push(...String(p.tags).split(" "));
 				return null;
+			case "removeTags":
+				for (const id of p.notes as number[]) {
+					const drop = new Set(String(p.tags).split(" "));
+					notes.get(id)!.tags = notes.get(id)!.tags.filter((t) => !drop.has(t));
+				}
+				return null;
 			case "suspend": for (const c of p.cards as number[]) suspended.add(c); return true;
 			case "sync": return null;
 			default: throw new Error(`unexpected action ${action}`);
@@ -189,5 +195,26 @@ describe("pushNotes", () => {
 	it("Anki closed surfaces as unreachable", async () => {
 		const request: AnkiRequest = () => Promise.reject(new AnkiUnreachableError("closed"));
 		await assert.rejects(pushNotes(desiredNotes(snapshot()), request), AnkiUnreachableError);
+	});
+});
+
+describe("module tags", () => {
+	it("nests a session's tag under its module", () => {
+		assert.equal(sessionTag("Lectures 1-3", "Linear Algebra"), "LearnHarness::Linear_Algebra::Lectures_1-3");
+		assert.equal(sessionTag("Lectures 1-3", null), "LearnHarness::Lectures_1-3");
+		const notes = desiredNotes(snapshot(), (sessionId) => (sessionId === "c1" ? "Data Structures" : null));
+		assert.deepEqual(notes[0]!.tags, ["LearnHarness", "LearnHarness::Data_Structures::Heaps_&_priority_queues"]);
+	});
+
+	it("moving a session into a module swaps our tag but keeps the learner's own and the deleted marker", async () => {
+		const anki = fakeAnki();
+		await pushNotes(desiredNotes(snapshot()), anki.request);
+		const first = [...anki.notes.values()][0]!;
+		first.tags.push("my-own-tag");
+		await pushNotes(desiredNotes(snapshot(), () => "Data Structures"), anki.request);
+		assert.ok(first.tags.includes("LearnHarness::Data_Structures::Heaps_&_priority_queues"));
+		assert.ok(!first.tags.includes("LearnHarness::Heaps_&_priority_queues"), "the old session tag came off");
+		assert.ok(first.tags.includes("my-own-tag"));
+		assert.ok(first.tags.includes("LearnHarness"));
 	});
 });

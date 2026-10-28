@@ -227,6 +227,17 @@ function setModule(id: string, moduleId: string | null): void {
 	emit("chats-changed", {});
 }
 
+/** Store a session recap (modules): updatedAt stays put — the recap is
+ *  about the conversation, not part of it. chats-changed fires so the
+ *  module panel refetches. */
+function saveRecap(id: string, recap: { text: string; forUpdatedAt: string }): void {
+	const record = getChat(id);
+	if (!record) throw new Error(`Chat not found: ${id}`);
+	record.recap = recap;
+	writeChat(record);
+	emit("chats-changed", {});
+}
+
 /** Delete the session record file entirely (session-deletion wave 6,
  *  owner 2026-09-22). False when the id is unknown — the route turns that
  *  into a 404. The record's graph traces and jobs are the route's
@@ -261,6 +272,7 @@ export const chatStore: ChatStore = {
 	saveSettings,
 	renameChat,
 	setModule,
+	saveRecap,
 	deleteChat,
 	appendTurnUsage,
 	appendExtractionUsage,

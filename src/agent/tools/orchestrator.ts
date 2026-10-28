@@ -44,7 +44,8 @@ export interface CreatedSession {
 
 export interface OrchestratorToolContext {
 	chatId: string;
-	moduleState: () => ModuleStateView | null;
+	/** May refresh stale recaps first, so it can be async. */
+	moduleState: () => ModuleStateView | null | Promise<ModuleStateView | null>;
 	createSession: (input: { title: string; kind: "teach" | "practice"; brief: string }) => CreatedSession;
 	updatePlan: (plan: string) => void;
 	/** The research + pdf jobs (absent in tests). */
@@ -89,8 +90,8 @@ export function orchestratorTools(ctx: OrchestratorToolContext): Record<string, 
 		label: "module_state",
 		description: "Read the module: its title, goal, current plan, and every session in it with dates and recaps.",
 		parameters: emptyInput,
-		execute: serverExecute("module_state", emptyInput, () => {
-			const state = ctx.moduleState();
+		execute: serverExecute("module_state", emptyInput, async () => {
+			const state = await ctx.moduleState();
 			if (!state) throw new Error("This module no longer exists");
 			return formatModuleState(state);
 		}),

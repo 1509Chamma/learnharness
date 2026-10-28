@@ -31,6 +31,8 @@ import type { AnkiStatus, AnkiSyncCounts } from "../core/anki-status.ts";
 import { subscribe } from "../core/events.ts";
 import { extractionStatuses } from "../agent/subagents/extraction.ts";
 import { graphRevision, graphView } from "./graph.ts";
+import { moduleStore } from "../store/modules.ts";
+import { stores } from "./stores.ts";
 
 const ANKI_URL = process.env.LH_ANKI_URL ?? "http://127.0.0.1:8765";
 const DEBOUNCE_MS = 5_000;
@@ -115,6 +117,11 @@ export async function pushNotes(
 		}
 		const missingTags = note.tags.filter((t) => !info.tags.includes(t));
 		if (missingTags.length > 0) await request("addTags", { notes: [info.noteId], tags: missingTags.join(" ") });
+		// A session that moved into (or out of) a module re-tags its cards:
+		// our own LearnHarness:: tags that no longer apply come off. The
+		// learner's own tags and the deleted marker are never touched.
+		const staleTags = info.tags.filter((t) => t.startsWith(`${ANKI_DECK}::`) && t !== DELETED_TAG && !note.tags.includes(t));
+		if (staleTags.length > 0) await request("removeTags", { notes: [info.noteId], tags: staleTags.join(" ") });
 	}
 
 	const payload = (note: DesiredNote) => ({
@@ -161,6 +168,32 @@ export async function pushNotes(
 	return { counts, webSync };
 }
 
+/** Birth session id → its module's title (modules): the Anki tag nests the
+ *  session under its module. */
+function moduleTitleLookup(): (sessionId: string) => string | null {
+	const titles = new Map(moduleStore.listModules().map((m) => [m.id, m.title]));
+	const moduleOf = new Map(
+		stores.chatStore.listChats().flatMap((c) => (c.moduleId ? [[c.id, c.moduleId] as const] : [])),
+	);
+	return (sessionId) => {
+		const moduleId = moduleOf.get(sessionId);
+		return moduleId ? (titles.get(moduleId) ?? null) : null;
+	};
+}
+
+/** Everything a sync's output depends on: the graph's revision, and which
+ *  module (and module title) each session sits in — filing a session moves
+ *  its cards' tags without touching the graph. */
+function syncSignature(): string {
+	const modules = moduleStore.listModules().map((m) => `${m.id}=${m.title}`).join(",");
+	const filed = stores.chatStore
+		.listChats()
+		.flatMap((c) => (c.moduleId ? [`${c.id}>${c.moduleId}`] : []))
+		.sort()
+		.join(",");
+	return `${graphRevision()}|${modules}|${filed}`;
+}
+
 // ─── the process-wide runner ──────────────────────────────────────────────────
 // globalThis, not module state: dev compiles routes as separate module
 // instances (the event-bus rationale, src/core/events.ts).
@@ -170,7 +203,9 @@ interface AnkiGlobal {
 		status: AnkiStatus;
 		running: Promise<AnkiStatus> | null;
 		timer: ReturnType<typeof setTimeout> | null;
-		syncedRevision: number | null;
+		/** What the last successful run synced: the graph revision plus the
+		 *  module membership that shapes the tags (syncSignature). */
+		syncedSignature: string | null;
 		subscribed: boolean;
 	};
 }
@@ -181,7 +216,7 @@ function runner() {
 		status: { state: "never", lastSyncAt: null, counts: null, message: null },
 		running: null,
 		timer: null,
-		syncedRevision: null,
+		syncedSignature: null,
 		subscribed: false,
 	};
 	return g.__lhAnki;
@@ -195,11 +230,11 @@ export function ankiStatus(): AnkiStatus {
 export function syncAnki(request: AnkiRequest = ankiConnect): Promise<AnkiStatus> {
 	const r = runner();
 	r.running ??= (async () => {
-		const revision = graphRevision();
+		const signature = syncSignature();
 		r.status = { ...r.status, state: "syncing" };
 		try {
-			const { counts, webSync } = await pushNotes(desiredNotes(graphView()), request);
-			r.syncedRevision = revision;
+			const { counts, webSync } = await pushNotes(desiredNotes(graphView(), moduleTitleLookup()), request);
+			r.syncedSignature = signature;
 			r.status = { state: "ok", lastSyncAt: new Date().toISOString(), counts, message: webSync };
 		} catch (err) {
 			const unreachable = err instanceof AnkiUnreachableError;
@@ -225,7 +260,7 @@ export function scheduleAnkiSync(): void {
 	r.timer = setTimeout(() => {
 		r.timer = null;
 		if (extractionStatuses().length > 0) return;
-		if (r.status.state === "ok" && r.syncedRevision === graphRevision()) return;
+		if (r.status.state === "ok" && r.syncedSignature === syncSignature()) return;
 		void syncAnki();
 	}, DEBOUNCE_MS);
 	r.timer.unref?.();

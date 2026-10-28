@@ -9,7 +9,9 @@
  *   - Recall      one per proposition: name → statement.
  *   - Derivation  one per stored chain: premises → conclusion.
  * Each note carries the birth session as a tag (`LearnHarness::<title>`),
- * so a commute review can filter to one topic.
+ * nested under its module when the session is filed in one
+ * (`LearnHarness::<module>::<title>`), so a commute review can filter to
+ * one module or one session.
  */
 
 import type { GraphNode, GraphSnapshot } from "./contracts.ts";
@@ -100,10 +102,17 @@ export function toAnkiHtml(text: string): string {
 	return out + inlineMarkdown(text.slice(last));
 }
 
-/** A session title as one Anki tag (tags cannot hold spaces). */
-export function sessionTag(title: string): string {
-	const slug = title.trim().replace(/\s+/g, "_").replace(/["]/g, "").replace(/:{2,}/g, ":");
-	return `${ANKI_DECK}::${slug || "untitled"}`;
+/** One tag segment: no spaces, no quotes, no "::" (Anki's hierarchy). */
+function tagSegment(text: string): string {
+	return text.trim().replace(/\s+/g, "_").replace(/["]/g, "").replace(/:{2,}/g, ":") || "untitled";
+}
+
+/** A session title as one Anki tag (tags cannot hold spaces), nested under
+ *  its module's title when it has one. */
+export function sessionTag(title: string, moduleTitle?: string | null): string {
+	return moduleTitle
+		? `${ANKI_DECK}::${tagSegment(moduleTitle)}::${tagSegment(title)}`
+		: `${ANKI_DECK}::${tagSegment(title)}`;
 }
 
 function sourceOf(node: GraphNode, snapshot: Pick<GraphSnapshot, "sessions" | "fileSources">): string | null {
@@ -112,12 +121,18 @@ function sourceOf(node: GraphNode, snapshot: Pick<GraphSnapshot, "sessions" | "f
 	return snapshot.sessions[birth] ?? snapshot.fileSources[birth] ?? null;
 }
 
-/** Every note the graph currently implies, recall notes first. */
+/** Every note the graph currently implies, recall notes first.
+ *  `moduleTitleOf` maps a birth session id to its module's title. */
 export function desiredNotes(
 	snapshot: Pick<GraphSnapshot, "propositions" | "chains" | "sessions" | "fileSources">,
+	moduleTitleOf: (sessionId: string) => string | null = () => null,
 ): DesiredNote[] {
 	const byId = new Map(snapshot.propositions.map((n) => [n.id, n]));
-	const tagsFor = (source: string | null) => (source ? [ANKI_DECK, sessionTag(source)] : [ANKI_DECK]);
+	const tagsFor = (source: string | null, node: GraphNode) => {
+		if (!source) return [ANKI_DECK];
+		const birth = birthSessionOf(node);
+		return [ANKI_DECK, sessionTag(source, birth ? moduleTitleOf(birth) : null)];
+	};
 
 	const recall: DesiredNote[] = snapshot.propositions.map((node) => {
 		const source = sourceOf(node, snapshot);
@@ -130,7 +145,7 @@ export function desiredNotes(
 				Statement: toAnkiHtml(node.statement),
 				Source: source ? escapeHtml(source) : "",
 			},
-			tags: tagsFor(source),
+			tags: tagsFor(source, node),
 		};
 	});
 
@@ -149,7 +164,7 @@ export function desiredNotes(
 				Conclusion: `<div class="lh-name">${toAnkiHtml(conclusion.name)}</div>${toAnkiHtml(conclusion.statement)}`,
 				Source: source ? escapeHtml(source) : "",
 			},
-			tags: tagsFor(source),
+			tags: tagsFor(source, conclusion),
 		});
 	}
 	return [...recall, ...derivation];

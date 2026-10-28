@@ -179,7 +179,7 @@ export function ModulePanel({
 											<span className="min-w-0 flex-1">
 												<span className="block truncate font-prose text-(length:--lh-prose-size)">{s.title}</span>
 												{s.recap?.text && (
-													<span className="mt-0.5 line-clamp-3 block text-xs leading-relaxed text-muted-foreground">{s.recap.text}</span>
+													<span className="mt-0.5 line-clamp-4 block whitespace-pre-line text-xs leading-relaxed text-muted-foreground">{s.recap.text}</span>
 												)}
 											</span>
 											{s.kind === "practice" && (
