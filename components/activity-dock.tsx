@@ -108,8 +108,13 @@ export function ActivityProvider({ children }: { children: React.ReactNode }) {
 				const res = await fetch("/api/activity");
 				if (res.ok) {
 					const data = (await res.json()) as Partial<ActivityFeed>;
+					// An unchanged feed keeps its identity, so a refetch that
+					// moved nothing re-renders none of the consumers.
 					if (alive)
-						setFeed({ jobs: data.jobs ?? [], extractions: data.extractions ?? [] });
+						setFeed((prev) => {
+							const next = { jobs: data.jobs ?? [], extractions: data.extractions ?? [] };
+							return JSON.stringify(next) === JSON.stringify(prev) ? prev : next;
+						});
 				}
 			} catch {
 				// transport blip: keep the last feed, announce again next event
@@ -151,7 +156,8 @@ export function ActivityProvider({ children }: { children: React.ReactNode }) {
 		[],
 	);
 
-	return <ActivityContext.Provider value={{ feed, refresh }}>{children}</ActivityContext.Provider>;
+	const value = useMemo(() => ({ feed, refresh }), [feed, refresh]);
+	return <ActivityContext.Provider value={value}>{children}</ActivityContext.Provider>;
 }
 
 /** The activity feed seam for the rest of the shell: the dock's data +

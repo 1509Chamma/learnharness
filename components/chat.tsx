@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createContext, Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps } from "react";
 import { useChatSession } from "@/components/session";
 import { visibleQueuedSteers } from "@/components/session-core";
 import { SetupDialog } from "@/components/setup-dialog";
@@ -196,6 +196,35 @@ function SystemLine({ children, testId }: { children: React.ReactNode; testId?: 
 
 function isSubagentSteer(m: LhViewMessage): boolean {
 	return (m.metadata as { subagentResult?: unknown } | undefined)?.subagentResult != null;
+}
+
+/** The composer draft, held outside Chat's state: as Chat state, every key
+ *  press re-rendered the whole session (transcript, cards, top bar). */
+function createDraftStore() {
+	let value = "";
+	const listeners = new Set<() => void>();
+	return {
+		get: () => value,
+		set(next: string) {
+			if (next === value) return;
+			value = next;
+			for (const listener of listeners) listener();
+		},
+		subscribe(listener: () => void) {
+			listeners.add(listener);
+			return () => {
+				listeners.delete(listener);
+			};
+		},
+	};
+}
+type DraftStore = ReturnType<typeof createDraftStore>;
+
+/** The Composer bound to the draft store — the only component a keystroke
+ *  re-renders. */
+function DraftComposer({ draft, ...props }: Omit<ComponentProps<typeof Composer>, "value"> & { draft: DraftStore }) {
+	const value = useSyncExternalStore(draft.subscribe, draft.get, draft.get);
+	return <Composer {...props} value={value} />;
 }
 
 /**
@@ -547,7 +576,11 @@ export function Chat({
 	// session's current phase.
 	const phases = useMemo(() => phaseTimeline(messages), [messages]);
 
-	const [text, setText] = useState("");
+	// The draft lives in a store, not Chat state (see DraftComposer): a
+	// keystroke re-renders only the composer, and Chat re-renders only when
+	// the draft flips between empty and non-empty (the one bit canSend reads).
+	const [draft] = useState(createDraftStore);
+	const hasText = useSyncExternalStore(draft.subscribe, () => draft.get().trim().length > 0, () => false);
 	/* The composer's value MIRROR ("nothing gets lost" round, owner
 	 * 2026-10-01): a dictation flush lands via setState, which a closure
 	 * waiting through `await finish()` cannot observe in time. Kept
@@ -555,8 +588,8 @@ export function Chat({
 	const textRef = useRef("");
 	const applyText = useCallback((v: string) => {
 		textRef.current = v;
-		setText(v);
-	}, []);
+		draft.set(v);
+	}, [draft]);
 	// Saved slot completeness is live, but the session's selected route
 	// comes from its own ordinary model control, never today's Strong pin.
 	const { catalog, configured, zeroKeys } = useModelSetup(initialConfigured);
@@ -741,7 +774,7 @@ export function Chat({
 	const retryable = (status === "ready" || status === "error") && !busy && !compacting && endsInFailedTurn(nativeMessages);
 	const retryFailedTurn = () => retryFailedResponse(send, draftRef);
 	const canSend =
-		(text.trim().length > 0 || dictation.active) && !pending && !activeProblem && !compacting;
+		(hasText || dictation.active) && !pending && !activeProblem && !compacting;
 
 	/* THE PRACTICE PAUSE (owner round 16): between problems — practice
 	 * kind, nothing active, nothing in flight, and at least one problem
@@ -887,6 +920,26 @@ export function Chat({
 	// overlay shell as mermaid, but carrying the raw svg + the card's invert
 	// state so the fullscreen view stays faithful to the toggled card.
 	const [figureFocus, setFigureFocus] = useState<{ svg: string; inverted: boolean } | null>(null);
+	// Stable context values: fresh object literals re-rendered every
+	// consumer (tool cards, figures) on each streamed token.
+	const mermaidActions = useMemo(
+		() => ({
+			openMermaid: setMermaidFocus,
+			openFigure: (svg: string, inverted: boolean) => setFigureFocus({ svg, inverted }),
+		}),
+		[],
+	);
+	const chatActions = useMemo(
+		() => ({
+			chatId,
+			syncFromServer,
+			sendText: (t: string) => {
+				void send({ type: "text", text: t });
+			},
+			openSetup: () => setSetupOpen(true),
+		}),
+		[chatId, syncFromServer, send],
+	);
 
 	// Overlay mirrors for the layered-Esc gate (owner 2026-10-04): the
 	// lh:kbd-abort-turn handler reads these at EVENT time — declared here
@@ -1243,22 +1296,8 @@ export function Chat({
 	};
 
 	return (
-		<ChatActionsContext.Provider
-			value={{
-				chatId,
-				syncFromServer,
-				sendText: (t: string) => {
-					void send({ type: "text", text: t });
-				},
-				openSetup: () => setSetupOpen(true),
-			}}
-		>
-		<SessionMermaidContext.Provider
-			value={{
-				openMermaid: setMermaidFocus,
-				openFigure: (svg, inverted) => setFigureFocus({ svg, inverted }),
-			}}
-		>
+		<ChatActionsContext.Provider value={chatActions}>
+		<SessionMermaidContext.Provider value={mermaidActions}>
 		<JobsContext.Provider value={jobs}>
 		{/* The session surface: the transcript column (header + scroller) and
 		    the plan-tree panel as full-height SIBLINGS — the panel spans top to
@@ -1714,13 +1753,13 @@ export function Chat({
 						)
 					}
 					composer={
-						<Composer
+						<DraftComposer
 							// Stop aborts ANY in-flight turn (stream-reattach wave): the
 							// square renders while a reattached/wake turn runs too — the
 							// abort channel kills it server-side; stop() alone would
 							// only detach our view.
 							busy={busy}
-							value={text}
+							draft={draft}
 							onChange={applyText}
 							inputRef={composerInputRef}
 							onSend={onSend}
