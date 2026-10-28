@@ -9,7 +9,7 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { BrailleSpinner } from "@/components/braille-spinner";
-import type { BackupStatus, StorageSettings } from "@/src/core";
+import type { BackupStatus, ObsidianStatus, StorageSettings } from "@/src/core";
 import { SettingsGroup, SettingsRow } from "./controls.tsx";
 
 /** A folder path field that saves on blur (and on Enter). */
@@ -143,6 +143,88 @@ export function StorageSection({
 					<code>data</code> folder.
 				</p>
 			</SettingsGroup>
+			<ObsidianGroup storage={storage} onSave={(folder) => saveFolder("obsidianFolder", folder)} />
 		</>
+	);
+}
+
+export function obsidianSummary(status: ObsidianStatus | null): string {
+	if (!status) return "Checking…";
+	if (!status.folder) return "Off: set a folder inside your vault";
+	if (!status.lastExportAt) return "Not exported yet";
+	return `Exported ${new Date(status.lastExportAt).toLocaleString()} · ${status.notes} notes`;
+}
+
+/** The Obsidian export: folder, status and Export now (POST /api/obsidian). */
+function ObsidianGroup({ storage, onSave }: { storage: StorageSettings | undefined; onSave: (folder: string) => void }) {
+	const [status, setStatus] = useState<ObsidianStatus | null>(null);
+	const [busy, setBusy] = useState(false);
+	useEffect(() => {
+		let live = true;
+		void fetch("/api/obsidian")
+			.then((r) => r.json())
+			.then((s: ObsidianStatus) => {
+				if (live) setStatus(s);
+			})
+			.catch(() => {});
+		return () => {
+			live = false;
+		};
+	}, [storage?.obsidianFolder]);
+	const exportNow = async () => {
+		setBusy(true);
+		try {
+			setStatus((await (await fetch("/api/obsidian", { method: "POST" })).json()) as ObsidianStatus);
+		} finally {
+			setBusy(false);
+		}
+	};
+	return (
+		<SettingsGroup label="Obsidian" testid="storage-obsidian">
+			<p className="text-xs text-muted-foreground">
+				Your knowledge as linked notes: one per concept (with what it follows from and leads to), one per session (recap and full
+				transcript) and one per module. Updated automatically after lessons. The app only writes inside this folder and rewrites its own
+				notes there, so link to them from your own notes rather than editing them.
+			</p>
+			<FolderField
+				value={storage?.obsidianFolder ?? ""}
+				label="Obsidian folder"
+				placeholder="e.g. G:\My Drive\Obsidian Notes\Knowledge Base\LearnHarness"
+				testid="obsidian-folder"
+				onSave={onSave}
+			/>
+			<SettingsRow
+				label={obsidianSummary(status)}
+				testid="row-obsidian-status"
+				hint={
+					<>
+						{status?.lastError && (
+							<span className="block text-red-400" role="alert">
+								{status.lastError}
+							</span>
+						)}
+						{status && status.skipped.length > 0 && (
+							<span className="block">
+								{status.skipped.length} note(s) skipped because one of your own notes has that name
+							</span>
+						)}
+					</>
+				}
+			>
+				<Button
+					type="button"
+					size="xs"
+					variant="outline"
+					className="cursor-pointer disabled:cursor-not-allowed"
+					data-testid="obsidian-export-now"
+					disabled={busy || !status?.folder}
+					aria-busy={busy}
+					onClick={() => void exportNow()}
+				>
+					{busy && <BrailleSpinner label="Exporting" />}
+					Export now
+				</Button>
+			</SettingsRow>
+		</SettingsGroup>
 	);
 }
