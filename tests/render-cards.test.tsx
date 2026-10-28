@@ -396,6 +396,27 @@ describe("math rendering (streamdown + KaTeX)", () => {
 		assert.match(html, /\$5/);
 	});
 
+	it("keeps math whose `<` is followed by a letter (not an HTML tag)", () => {
+		// remend's incomplete-HTML-tag repair (streaming-markdown cleanup)
+		// read `<A<1$` as an unclosed tag and truncated from the `<` to the
+		// end, dropping the closing `$` (remend < 1.4.0, vercel/streamdown#617).
+		const cases: Array<[string, number]> = [
+			["$0<A<1$", 1],
+			["$x<y$", 1],
+			["$a<b$ and $0 < A$", 2],
+			["$e^y<1$, pa $\\ln A>0\\iff 0<A<1$", 2],
+			["$$\n\\sum_{j<k} p_j\n$$\n\nTAIL", 1],
+		];
+		for (const [source, expected] of cases) {
+			const html = renderToStaticMarkup(<MessageResponse>{source}</MessageResponse>);
+			const katexCount = (html.match(/class="katex"/g) ?? []).length;
+			assert.equal(katexCount, expected, `${JSON.stringify(source)} must render ${expected} math span(s), got: ${html.slice(0, 300)}`);
+			assert.ok(!/>\$/.test(html.replace(/<annotation[\s\S]*?<\/annotation>/g, "")), `${JSON.stringify(source)} leaves no stray $`);
+		}
+		const tail = renderToStaticMarkup(<MessageResponse>{"$$\n\\sum_{j<k} p_j\n$$\n\nTAIL"}</MessageResponse>);
+		assert.match(tail, /TAIL/, "text after the math survives");
+	});
+
 	it("quiz cards render math in question, options, and explanation", () => {
 		const mathQuiz = {
 			question: "What is $\\frac{dy}{dx}$ of $y = x^2$?",
