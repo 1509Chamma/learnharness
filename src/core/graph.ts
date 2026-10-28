@@ -536,13 +536,18 @@ export function graphSnapshot(deps: GraphDeps): GraphSnapshot {
 	}
 	const sessions: Record<string, string> = {};
 	const fileSources: Record<string, string> = {};
+	// Titles from the (memoized) summaries rather than a full transcript
+	// parse per source; getChat stays the fallback for any chat the list
+	// skipped. Sources are read once, not once per id.
+	const titles = new Map(deps.chatStore.listChats().map((c) => [c.id, c.title]));
+	const sourcesById = new Map(deps.graphStore.readSources().map((s) => [s.id, s]));
 	for (const id of sourceIds) {
-		const chat = deps.chatStore.getChat(id);
-		if (chat) {
-			sessions[id] = chat.title;
+		const title = titles.get(id) ?? deps.chatStore.getChat(id)?.title;
+		if (title !== undefined) {
+			sessions[id] = title;
 			continue;
 		}
-		const source = deps.graphStore.readSources().find((s) => s.id === id);
+		const source = sourcesById.get(id);
 		if (source) fileSources[id] = source.filePath;
 	}
 

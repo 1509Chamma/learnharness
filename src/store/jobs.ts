@@ -72,13 +72,19 @@ function updateJob(id: string, patch: JobPatch): JobRecord | null {
 
 /** All jobs for a chat, newest activity first. */
 function listJobs(chatId: string): JobRecord[] {
+	return listAllJobs().filter((j) => j.chatId === chatId);
+}
+
+/** Every job across all chats, newest activity first — one directory read
+ *  for callers that would otherwise call listJobs once per chat. */
+function listAllJobs(): JobRecord[] {
 	try {
 		fs.mkdirSync(JOBS_DIR, { recursive: true });
 		return fs
 			.readdirSync(JOBS_DIR)
 			.filter((f) => f.endsWith(".json"))
 			.map((f) => getJob(f.slice(0, -5)))
-			.filter((j): j is JobRecord => j !== null && j.chatId === chatId)
+			.filter((j): j is JobRecord => j !== null)
 			.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 	} catch {
 		return [];
@@ -115,6 +121,7 @@ export const jobStore: JobStore = {
 	getJob,
 	updateJob,
 	listJobs,
+	listAllJobs,
 	findJobByToolCallId,
 	deleteJobsForChat,
 };

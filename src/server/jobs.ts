@@ -759,6 +759,11 @@ export function recoverStaleJobs(): void {
 	}
 }
 
+/** Every job across chats (the activity feed's single pass). */
+export function listAllJobs(): JobRecord[] {
+	return stores.jobStore.listAllJobs();
+}
+
 /** The /api/jobs entry: job list for the client poll (+ lazy recovery). */
 export function listJobs(chatId: string): JobRecord[] {
 	if (process.env.NODE_ENV !== "test") recoverStaleJobs();

@@ -23,7 +23,7 @@ import { extractionStatuses, type ExtractionPhase } from "../agent/subagents/ext
 import { chatStore } from "../store/chats.ts";
 import { graphRevision } from "./graph.ts";
 import { catalogContextLimits } from "./model-catalog.ts";
-import { listJobs } from "./jobs.ts";
+import { listAllJobs } from "./jobs.ts";
 import { jobCost } from "./pricing.ts";
 import type { JobRecord } from "../core/contracts.ts";
 
@@ -71,19 +71,20 @@ export function activityFeed(): {
 	extractions: ActivityExtraction[];
 	graphRevision: number;
 } {
-	const chats = chatStore.listChats();
+	const titles = new Map(chatStore.listChats().map((chat) => [chat.id, chat.title ?? chat.id]));
 	const limits = catalogContextLimits();
 	const jobs: ActivityJob[] = [];
-	for (const chat of chats) {
-		for (const job of listJobs(chat.id)) {
-			if (job.status === "running") {
-				jobs.push({
-					...job,
-					costUsd: jobCost(job),
-					title: chat.title ?? chat.id,
-					contextLimit: job.usage ? (limits.get(job.usage.model) ?? null) : null,
-				});
-			}
+	// One pass over the job files; jobs whose chat no longer lists are
+	// skipped, exactly as the old per-chat loop never reached them.
+	for (const job of listAllJobs()) {
+		const title = titles.get(job.chatId);
+		if (title !== undefined && job.status === "running") {
+			jobs.push({
+				...job,
+				costUsd: jobCost(job),
+				title,
+				contextLimit: job.usage ? (limits.get(job.usage.model) ?? null) : null,
+			});
 		}
 	}
 	const extractions: ActivityExtraction[] = extractionStatuses().map((run) => ({
