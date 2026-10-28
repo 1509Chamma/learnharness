@@ -48,6 +48,12 @@ export const AUTH_KEYS: readonly AuthKeyInfo[] = [
 		description: "Web-search engine for the researcher sub-agent — the alternative to Tavily. Setting the key activates it.",
 		docsUrl: "https://brave.com/search/api/",
 	},
+	{
+		id: "CALENDAR_ICS_URL",
+		label: "Calendar",
+		description: "Private iCal link(s) the tutor reads your schedule from (read-only) — in Google Calendar: Settings → your calendar → Secret address in iCal format. Separate several with commas.",
+		docsUrl: "https://support.google.com/calendar/answer/37648",
+	},
 ] as const;
 
 const AUTH_KEY_IDS: ReadonlySet<string> = new Set(AUTH_KEYS.map((k) => k.id));
@@ -164,6 +170,12 @@ export function validateKeyShape(id: string, rawValue: string): KeyShapeResult {
 		case "DEEPGRAM_API_KEY":
 			// No public format — the length floor only catches truncated pastes.
 			return nonEmpty(20);
+		case "CALENDAR_ICS_URL":
+			// One or more comma-separated iCal links — each must be https or webcal.
+			return value.length > 0 && !/\s/.test(value) &&
+				value.split(",").every((u) => /^(https|webcal):\/\/\S+$/i.test(u.trim()))
+				? { ok: true }
+				: { ok: false, error: `${id} must be one or more https:// or webcal:// links, separated by commas` };
 		default:
 			return { ok: false, error: `unknown key "${id}" (supported: ${[...AUTH_KEY_IDS].join(", ")})` };
 	}

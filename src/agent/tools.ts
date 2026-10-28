@@ -13,6 +13,7 @@ import {
 	quizInputProblems,
 } from "../core/question-core.ts";
 import { filterEnabledTools, type EnabledTools } from "../core/pending.ts";
+import { calendarAvailable, calendarTool } from "./tools/calendar.ts";
 import type { JobRecord } from "../core/contracts.ts";
 import type { JobStore } from "../core/ports.ts";
 import { jobTools, type DemoInput, type PdfInput, type ResearchInput, type VisualInput } from "./tools/jobs.ts";
@@ -459,6 +460,8 @@ export function createTeacherTools(
 			grep: grepTool,
 			...planTools(ctx),
 			...jobTools({ chatId: ctx.chatId, jobStore: ctx.jobStore, spawn: ctx.spawn, searchAvailable: ctx.searchAvailable }),
+			// Read-only calendar (fork feature): present only while a link is saved.
+			...(calendarAvailable() ? { calendar: calendarTool } : {}),
 		},
 		withoutMechanics(enabled),
 		),
