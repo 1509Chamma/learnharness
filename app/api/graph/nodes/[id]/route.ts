@@ -1,4 +1,4 @@
-import { deleteGraphNode } from "@/src/server";
+import { deleteGraphNode, scheduleAnkiSync } from "@/src/server";
 
 /**
  * DELETE /api/graph/nodes/[id] — single-node deletion, FULL DEATH (owner
@@ -23,5 +23,6 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
 	if (!outcome.ok) {
 		return Response.json({ error: outcome.error, code: outcome.code }, { status: outcome.status });
 	}
+	scheduleAnkiSync();
 	return Response.json({ stats: outcome.stats, graphRevision: outcome.graphRevision });
 }
